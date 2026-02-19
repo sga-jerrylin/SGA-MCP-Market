@@ -4,26 +4,29 @@
 
     <!-- Hero -->
     <section class="hero">
-      <h1 class="hero-title">企业级 MCP 工具包仓库</h1>
-      <div class="search-wrap">
-        <a-input
-          v-model:value="q"
-          size="large"
-          placeholder="搜索工具包名称、分类..."
-          class="search-input"
-          allow-clear
-          @change="onSearchChange"
-        >
-          <template #prefix>
-            <SearchOutlined style="color: #aaa" />
-          </template>
-        </a-input>
+      <div class="hero-overlay">
+        <h1 class="hero-title">企业级 MCP 工具包仓库</h1>
+        <div class="search-wrap">
+          <a-input
+            v-model:value="q"
+            size="large"
+            placeholder="搜索工具包名称、分类..."
+            class="search-input"
+            allow-clear
+            @change="onSearchChange"
+          >
+            <template #prefix>
+              <SearchOutlined style="color: #aaa" />
+            </template>
+          </a-input>
+        </div>
+        <p class="stats-row">
+          <span class="stat-num">{{ stats.packages }}</span> 个工具包 ·
+          <span class="stat-num">{{ stats.tools }}</span> 个工具 ·
+          <span class="stat-num">{{ stats.categories }}</span> 个分类
+        </p>
+        <p class="hero-tagline">由 Solo Genis Ai (SGA) 驱动 · 让每个开发者拥有 AI 超能力 🦞</p>
       </div>
-      <p class="stats-row">
-        <span class="stat-num">{{ stats.packages }}</span> 个工具包 ·
-        <span class="stat-num">{{ stats.tools }}</span> 个工具 ·
-        <span class="stat-num">{{ stats.categories }}</span> 个分类
-      </p>
     </section>
 
     <!-- Category tabs -->
@@ -45,7 +48,10 @@
     <div class="content-wrap">
       <a-spin :spinning="loading" tip="加载中...">
         <div v-if="!loading && filtered.length === 0" class="empty-state">
-          <a-empty description="暂无符合条件的工具包" />
+          <div style="text-align:center;padding:60px 0;">
+            <img src="/logo.jpg" style="width:120px;border-radius:16px;margin-bottom:16px;" alt="MCP Claw" />
+            <p style="color:#888">还没有工具包，快来发布第一个吧！</p>
+          </div>
         </div>
 
         <div v-else class="card-grid">
@@ -89,6 +95,8 @@
         />
       </div>
     </div>
+
+    <FooterBar />
   </div>
 </template>
 
@@ -97,6 +105,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { SearchOutlined } from '@ant-design/icons-vue';
 import NavBar from '@/components/NavBar.vue';
+import FooterBar from '@/components/FooterBar.vue';
 import http from '@/utils/http';
 
 interface MarketItem {
@@ -233,7 +242,17 @@ onMounted(() => {
 
 /* Hero */
 .hero {
-  background: linear-gradient(180deg, #e8f4ff 0%, #f5f9ff 100%);
+  background: url('/hero-bg.png') center/cover no-repeat;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero-overlay {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(2px);
+  width: 100%;
   padding: 56px 24px 40px;
   text-align: center;
 }
@@ -271,6 +290,13 @@ onMounted(() => {
 .stat-num {
   color: #1677ff;
   font-weight: 700;
+}
+
+.hero-tagline {
+  color: #888;
+  font-size: 13px;
+  font-style: italic;
+  margin: 12px 0 0;
 }
 
 /* Tabs */

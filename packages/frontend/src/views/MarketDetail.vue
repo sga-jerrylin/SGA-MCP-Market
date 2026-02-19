@@ -145,6 +145,8 @@
         <a-empty v-else-if="!loading" description="未找到该工具包" style="margin-top: 80px" />
       </a-spin>
     </div>
+
+    <FooterBar />
   </div>
 </template>
 
@@ -155,6 +157,7 @@ import { CopyOutlined } from '@ant-design/icons-vue';
 import type { TableColumnsType } from 'ant-design-vue';
 import { message } from 'ant-design-vue';
 import NavBar from '@/components/NavBar.vue';
+import FooterBar from '@/components/FooterBar.vue';
 import http from '@/utils/http';
 
 interface MarketItem {

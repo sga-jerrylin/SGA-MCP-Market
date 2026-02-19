@@ -2,8 +2,9 @@
   <header class="navbar">
     <div class="navbar-inner">
       <div class="navbar-left">
-        <div class="logo-square">M</div>
+        <img src="/logo.jpg" alt="MCP Claw" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;" />
         <span class="brand-text">MCP Market</span>
+        <span class="brand-by">by SGA</span>
         <nav v-if="showLinks" class="nav-links">
           <router-link to="/" class="nav-link">首页</router-link>
           <a href="#" class="nav-link">市场</a>
@@ -88,25 +89,18 @@ function logout(): void {
   gap: 12px;
 }
 
-.logo-square {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  background: linear-gradient(135deg, #1677ff 0%, #0050b3 100%);
-  color: #fff;
-  font-weight: 700;
-  font-size: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
 .brand-text {
   color: #fff;
   font-weight: 600;
   font-size: 16px;
   white-space: nowrap;
+}
+
+.brand-by {
+  color: #8b92a5;
+  font-size: 11px;
+  white-space: nowrap;
+  margin-left: -4px;
 }
 
 .nav-links {

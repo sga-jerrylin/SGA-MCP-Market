@@ -4,10 +4,10 @@
     <div class="login-body">
       <div class="login-card">
         <div class="login-logo">
-          <div class="logo-sq">M</div>
+          <img src="/logo.jpg" style="width:72px;height:72px;border-radius:16px;object-fit:cover;" alt="MCP Claw" />
         </div>
         <h2 class="login-title">SGA MCP Market</h2>
-        <p class="login-sub">登录您的账号以继续</p>
+        <p class="login-sub">Solo Genis Ai (SGA) MCP 工具包仓库</p>
 
         <a-form layout="vertical" @finish="onSubmit">
           <a-form-item
@@ -133,19 +133,6 @@ async function onSubmit(): Promise<void> {
   display: flex;
   justify-content: center;
   margin-bottom: 16px;
-}
-
-.logo-sq {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #1677ff 0%, #0050b3 100%);
-  color: #fff;
-  font-weight: 700;
-  font-size: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .login-title {
