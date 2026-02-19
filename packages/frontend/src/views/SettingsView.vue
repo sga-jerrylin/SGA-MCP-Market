@@ -98,7 +98,7 @@
                   发送邀请
                 </a-button>
                 <div v-if="inviteResult" class="invite-success-box">
-                  <p class="invite-success-label">邀请成功！请复制并告知用户：</p>
+                  <p class="invite-success-label">邀请成功！临时密码（用户首次登录需修改）：</p>
                   <div class="invite-password-box">
                     临时密码: <strong>{{ inviteResult }}</strong>
                   </div>

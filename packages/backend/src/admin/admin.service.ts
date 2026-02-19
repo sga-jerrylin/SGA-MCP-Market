@@ -22,13 +22,15 @@ export class AdminService {
   ) {}
 
   async listUsers(): Promise<
-    Array<{ id: string; email: string; isSuperUser: boolean; createdAt: Date }>
+    Array<{ id: string; email: string; role: string; isSuperUser: boolean; forcePasswordChange: boolean; createdAt: Date }>
   > {
     const rows = await this.users.find({ order: { createdAt: 'ASC' } });
     return rows.map((u) => ({
       id: u.id,
       email: u.email,
+      role: u.isSuperUser ? 'superadmin' : 'member',
       isSuperUser: u.isSuperUser,
+      forcePasswordChange: u.forcePasswordChange,
       createdAt: u.createdAt
     }));
   }
@@ -46,7 +48,8 @@ export class AdminService {
       this.users.create({
         email,
         passwordHash: createHash('sha256').update(tempPassword).digest('hex'),
-        isSuperUser: false
+        isSuperUser: false,
+        forcePasswordChange: true
       })
     );
     return { email, tempPassword };

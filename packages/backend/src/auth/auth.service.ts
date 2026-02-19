@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -36,7 +36,7 @@ export class AuthService {
   async login(
     email: string,
     password: string
-  ): Promise<{ accessToken: string; isSuperUser: boolean; email: string }> {
+  ): Promise<{ accessToken: string; isSuperUser: boolean; email: string; forcePasswordChange: boolean }> {
     const user = await this.users.findOne({ where: { email } });
     if (!user || user.passwordHash !== this.hash(password)) {
       throw new UnauthorizedException('invalid credentials');
@@ -53,7 +53,22 @@ export class AuthService {
       })
     );
 
-    return { accessToken: token, isSuperUser: user.isSuperUser, email: user.email };
+    return {
+      accessToken: token,
+      isSuperUser: user.isSuperUser,
+      email: user.email,
+      forcePasswordChange: user.forcePasswordChange
+    };
+  }
+
+  async changePassword(userId: string, newPassword: string): Promise<void> {
+    if (!newPassword || newPassword.trim().length < 6) {
+      throw new BadRequestException('password must be at least 6 characters');
+    }
+    await this.users.update(userId, {
+      passwordHash: this.hash(newPassword),
+      forcePasswordChange: false
+    });
   }
 
   async createToken(

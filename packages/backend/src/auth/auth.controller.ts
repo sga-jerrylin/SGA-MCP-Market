@@ -27,8 +27,18 @@ export class AuthController {
   @Post('login')
   async login(
     @Body() body: { email: string; password: string }
-  ): Promise<{ accessToken: string; isSuperUser: boolean; email: string }> {
+  ): Promise<{ accessToken: string; isSuperUser: boolean; email: string; forcePasswordChange: boolean }> {
     return this.authService.login(body.email, body.password);
+  }
+
+  @UseGuards(AuthGuard)
+  @Post('change-password')
+  async changePassword(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: { newPassword: string }
+  ): Promise<{ ok: true }> {
+    await this.authService.changePassword(req.user!.userId, body.newPassword);
+    return { ok: true };
   }
 
   @UseGuards(AuthGuard)

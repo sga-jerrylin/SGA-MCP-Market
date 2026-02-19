@@ -65,6 +65,7 @@ interface LoginResp {
   token?: string;
   isSuperUser?: boolean;
   email?: string;
+  forcePasswordChange?: boolean;
 }
 
 const router = useRouter();
@@ -85,20 +86,27 @@ async function onSubmit(): Promise<void> {
     let token = '';
     let isSuperUser = false;
     let email = '';
+    let forcePasswordChange = false;
     if (raw && typeof raw === 'object' && 'data' in raw && raw.data) {
       token = (raw.data as LoginResp).accessToken || (raw.data as LoginResp).token || '';
       isSuperUser = (raw.data as LoginResp).isSuperUser ?? false;
       email = (raw.data as LoginResp).email ?? '';
+      forcePasswordChange = (raw.data as LoginResp).forcePasswordChange ?? false;
     } else {
       token = (raw as LoginResp).accessToken || (raw as LoginResp).token || '';
       isSuperUser = (raw as LoginResp).isSuperUser ?? false;
       email = (raw as LoginResp).email ?? '';
+      forcePasswordChange = (raw as LoginResp).forcePasswordChange ?? false;
     }
     if (token) {
       localStorage.setItem('sga_market_token', token);
-      localStorage.setItem('sga_user_info', JSON.stringify({ isSuperUser, email }));
+      localStorage.setItem('sga_user_info', JSON.stringify({ isSuperUser, email, forcePasswordChange }));
       void message.success('登录成功');
-      await router.push(isSuperUser ? '/settings' : '/tokens');
+      if (forcePasswordChange) {
+        await router.push('/change-password');
+      } else {
+        await router.push(isSuperUser ? '/settings' : '/tokens');
+      }
     } else {
       void message.error('登录失败：未获取到令牌');
     }

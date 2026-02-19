@@ -22,8 +22,11 @@
       </div>
       <div class="navbar-right">
         <template v-if="isLoggedIn">
+          <router-link v-if="isLoggedIn" to="/tokens" class="nav-token-link">🔑 令牌</router-link>
           <a v-if="isSuperUser" class="nav-settings-link" @click="router.push('/settings')">⚙️ 设置</a>
           <span class="user-email">{{ userEmail }}</span>
+          <span v-if="isSuperUser" class="role-badge super">超级管理员</span>
+          <span v-else-if="isLoggedIn" class="role-badge member">普通用户</span>
           <a-button class="logout-btn" @click="logout">Logout</a-button>
         </template>
         <template v-else>
@@ -246,5 +249,34 @@ function logout(): void {
   border-color: rgba(255, 255, 255, 0.6) !important;
   color: #fff !important;
   background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.nav-token-link {
+  color: rgba(255, 255, 255, 0.75);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+.nav-token-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+.role-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.role-badge.super {
+  background: rgba(124, 58, 237, 0.3);
+  color: #c4b5fd;
+  border: 1px solid rgba(124, 58, 237, 0.4);
+}
+.role-badge.member {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 </style>

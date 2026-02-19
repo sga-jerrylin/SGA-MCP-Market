@@ -17,7 +17,13 @@ const router = createRouter({
       name: 'Settings',
       component: () => import('@/views/SettingsView.vue'),
       meta: { requiresAuth: true, requiresSuperUser: true }
-    }
+    },
+    {
+      path: '/change-password',
+      name: 'ChangePassword',
+      component: () => import('@/views/Auth/ChangePasswordView.vue'),
+      meta: { requiresAuth: true }
+    },
   ]
 });
 

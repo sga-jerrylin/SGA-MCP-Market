@@ -1,4 +1,4 @@
-﻿import {
+import {
   Column,
   CreateDateColumn,
   Entity,
@@ -20,6 +20,9 @@ export class User {
 
   @Column({ default: false })
   isSuperUser!: boolean;
+
+  @Column({ default: false })
+  forcePasswordChange!: boolean;
 
   @CreateDateColumn()
   createdAt!: Date;
