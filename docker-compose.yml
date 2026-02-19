@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sga-market-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: market
+      POSTGRES_PASSWORD: market
+      POSTGRES_DB: market
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: packages/backend/Dockerfile
+    container_name: sga-market-backend
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    environment:
+      PORT: 3100
+      DB_PATH: /app/data/market.sqlite
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - postgres
+
+  frontend:
+    build:
+      context: .
+      dockerfile: packages/frontend/Dockerfile
+    container_name: sga-market-frontend
+    restart: unless-stopped
+    ports:
+      - "5100:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres-data: {}
