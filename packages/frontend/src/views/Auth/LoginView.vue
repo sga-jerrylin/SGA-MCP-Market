@@ -1,15 +1,15 @@
 <template>
   <div class="login-page">
-    <NavBar />
+    <NavBar :show-brand="false" />
     <div class="login-body">
       <div class="login-card">
         <div class="login-logo">
-          <img src="/logo.jpg" style="width:96px;height:96px;border-radius:20px;object-fit:cover;" alt="MCP Claw" />
+          <img src="/logo.jpg" style="width:140px;height:140px;border-radius:24px;object-fit:cover;" alt="MCP Claw" />
         </div>
         <h2 class="login-title">Claw MCP Market</h2>
         <p class="login-sub">SGA-Molt中国社区MCP市场</p>
 
-        <a-form layout="vertical" @finish="onSubmit">
+        <a-form layout="vertical" :model="form" @finish="onSubmit">
           <a-form-item
             label="邮箱"
             name="email"

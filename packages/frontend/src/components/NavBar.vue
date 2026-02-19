@@ -8,7 +8,7 @@
     </div>
 
     <!-- Brand row -->
-    <div class="navbar-inner">
+    <div v-if="showBrand" class="navbar-inner">
       <div class="navbar-left">
         <img src="/logo.jpg" alt="MCP Claw" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;" />
         <span class="brand-text">MCP Market</span>
@@ -47,8 +47,9 @@ const DEFAULT_ANNOUNCEMENT =
 withDefaults(
   defineProps<{
     showLinks?: boolean;
+    showBrand?: boolean;
   }>(),
-  { showLinks: false }
+  { showLinks: false, showBrand: true }
 );
 
 const router = useRouter();
