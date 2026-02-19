@@ -1,5 +1,13 @@
 <template>
   <header class="navbar">
+    <!-- Marquee announcement bar -->
+    <div class="marquee-wrapper">
+      <div class="marquee-track">
+        <span class="marquee-text">{{ announcementText }}</span>
+      </div>
+    </div>
+
+    <!-- Brand row -->
     <div class="navbar-inner">
       <div class="navbar-left">
         <img src="/logo.jpg" alt="MCP Claw" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;" />
@@ -14,6 +22,7 @@
       </div>
       <div class="navbar-right">
         <template v-if="isLoggedIn">
+          <a v-if="isSuperUser" class="nav-settings-link" @click="router.push('/settings')">⚙️ 设置</a>
           <span class="user-email">{{ userEmail }}</span>
           <a-button class="logout-btn" @click="logout">Logout</a-button>
         </template>
@@ -28,10 +37,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import http from '@/utils/http';
 
-const props = withDefaults(
+const DEFAULT_ANNOUNCEMENT =
+  '🦞 欢迎来到 Claw MCP Market · SGA-Molt 中国社区 MCP 市场 · 工具包正在持续上新中...';
+
+withDefaults(
   defineProps<{
     showLinks?: boolean;
   }>(),
@@ -39,6 +52,8 @@ const props = withDefaults(
 );
 
 const router = useRouter();
+
+const announcementText = ref(DEFAULT_ANNOUNCEMENT);
 
 const isLoggedIn = computed(() => !!localStorage.getItem('sga_market_token'));
 
@@ -57,8 +72,41 @@ const userEmail = computed(() => {
   return '';
 });
 
+const isSuperUser = computed(() => {
+  try {
+    const info = localStorage.getItem('sga_user_info');
+    if (!info) return false;
+    const parsed = JSON.parse(info) as { isSuperUser?: boolean };
+    return parsed.isSuperUser === true;
+  } catch {
+    return false;
+  }
+});
+
+onMounted(async () => {
+  try {
+    const res = await http.get<{ text?: string; announcement?: string } | string>(
+      '/admin/announcement'
+    );
+    const data = res.data;
+    let text = '';
+    if (typeof data === 'string') {
+      text = data;
+    } else if (data && typeof data === 'object') {
+      text = (data as { text?: string; announcement?: string }).text ||
+             (data as { text?: string; announcement?: string }).announcement || '';
+    }
+    if (text.trim()) {
+      announcementText.value = text.trim();
+    }
+  } catch {
+    // keep default text on error
+  }
+});
+
 function logout(): void {
   localStorage.removeItem('sga_market_token');
+  localStorage.removeItem('sga_user_info');
   void router.push('/login');
 }
 </script>
@@ -66,17 +114,48 @@ function logout(): void {
 <style scoped>
 .navbar {
   background: #0f1117;
-  height: 60px;
   position: sticky;
   top: 0;
   z-index: 100;
   border-bottom: 1px solid #1e2230;
 }
 
+/* ── Marquee bar ── */
+.marquee-wrapper {
+  background: linear-gradient(90deg, #1a1d2e, #2d1b69, #1a1d2e);
+  height: 36px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.marquee-track {
+  display: inline-flex;
+  white-space: nowrap;
+  animation: marquee 25s linear infinite;
+}
+
+.marquee-text {
+  color: #e0d7ff;
+  font-size: 13px;
+  white-space: nowrap;
+  padding: 0 24px;
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(100vw);
+  }
+  to {
+    transform: translateX(-100%);
+  }
+}
+
+/* ── Brand row ── */
 .navbar-inner {
   max-width: 1280px;
   margin: 0 auto;
-  height: 100%;
+  height: 56px;
   padding: 0 24px;
   display: flex;
   align-items: center;
@@ -129,6 +208,21 @@ function logout(): void {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.nav-settings-link {
+  color: #c4b5fd;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.nav-settings-link:hover {
+  background: rgba(196, 181, 253, 0.12);
+  color: #ddd6fe;
 }
 
 .user-email {

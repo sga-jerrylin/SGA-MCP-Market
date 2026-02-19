@@ -1,11 +1,12 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { AuthService } from './auth.service';
+import { AuthService } from '../auth/auth.service';
 
 interface AuthenticatedRequest extends Request {
   user?: {
@@ -16,7 +17,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 @Injectable()
-export class AuthGuard implements CanActivate {
+export class AdminGuard implements CanActivate {
   constructor(private readonly authService: AuthService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -27,6 +28,10 @@ export class AuthGuard implements CanActivate {
     }
 
     const user = await this.authService.verifyToken(token);
+    if (!user.isSuperUser) {
+      throw new ForbiddenException('Super user access required');
+    }
+
     request.user = {
       userId: user.userId,
       email: user.email,

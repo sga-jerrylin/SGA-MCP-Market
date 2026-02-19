@@ -33,7 +33,10 @@ export class AuthService {
     return { id: saved.id, email: saved.email };
   }
 
-  async login(email: string, password: string): Promise<string> {
+  async login(
+    email: string,
+    password: string
+  ): Promise<{ accessToken: string; isSuperUser: boolean; email: string }> {
     const user = await this.users.findOne({ where: { email } });
     if (!user || user.passwordHash !== this.hash(password)) {
       throw new UnauthorizedException('invalid credentials');
@@ -50,7 +53,7 @@ export class AuthService {
       })
     );
 
-    return token;
+    return { accessToken: token, isSuperUser: user.isSuperUser, email: user.email };
   }
 
   async createToken(
@@ -96,7 +99,9 @@ export class AuthService {
     await this.tokens.delete({ id, userId });
   }
 
-  async verifyToken(tokenValue: string): Promise<{ userId: string }> {
+  async verifyToken(
+    tokenValue: string
+  ): Promise<{ userId: string; email: string; isSuperUser: boolean }> {
     const row = await this.tokens.findOne({ where: { token: tokenValue } });
     if (!row) {
       throw new UnauthorizedException('invalid token');
@@ -104,7 +109,11 @@ export class AuthService {
     if (row.expiresAt && row.expiresAt.getTime() < Date.now()) {
       throw new UnauthorizedException('token expired');
     }
-    return { userId: row.userId };
+    const user = await this.users.findOne({ where: { id: row.userId } });
+    if (!user) {
+      throw new UnauthorizedException('user not found');
+    }
+    return { userId: row.userId, email: user.email, isSuperUser: user.isSuperUser };
   }
 
   private hash(password: string): string {

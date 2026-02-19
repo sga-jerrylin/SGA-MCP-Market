@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { PackagesModule } from './packages/packages.module';
 
@@ -16,8 +17,8 @@ import { PackagesModule } from './packages/packages.module';
       synchronize: process.env.NODE_ENV !== 'production'
     }),
     AuthModule,
-    PackagesModule
+    PackagesModule,
+    AdminModule
   ]
 })
 export class AppModule {}
-
