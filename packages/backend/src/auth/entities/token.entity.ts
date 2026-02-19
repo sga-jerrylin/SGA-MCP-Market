@@ -1,4 +1,4 @@
-﻿import {
+import {
   Column,
   CreateDateColumn,
   Entity,
@@ -29,9 +29,10 @@ export class Token {
   @Column({ type: 'simple-json', nullable: true })
   scope!: string[] | null;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   expiresAt!: Date | null;
 
   @CreateDateColumn()
   createdAt!: Date;
 }
+
