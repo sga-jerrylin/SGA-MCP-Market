@@ -47,6 +47,7 @@ export class PackagesController {
       category?: string;
       status?: string;
       toolsCount?: string;
+      credentials?: string;
     }
   ) {
     return this.packagesService.publish(req.user!.userId, file, body);

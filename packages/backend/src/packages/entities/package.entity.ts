@@ -8,6 +8,15 @@
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 
+export interface PackageCredentialField {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  description?: string;
+  defaultValue?: string;
+}
+
 @Entity('packages')
 export class PackageEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -52,6 +61,9 @@ export class PackageEntity {
 
   @Column({ default: 0 })
   downloads!: number;
+
+  @Column('simple-json', { nullable: true, default: null })
+  credentials!: PackageCredentialField[] | null;
 
   @Column()
   sha256!: string;
