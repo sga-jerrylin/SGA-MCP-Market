@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AgentModule } from './agent/agent.module';
 import { AdminModule } from './admin/admin.module';
 import { AuthModule } from './auth/auth.module';
 import { PackagesModule } from './packages/packages.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST ?? 'localhost',
@@ -18,7 +21,8 @@ import { PackagesModule } from './packages/packages.module';
     }),
     AuthModule,
     PackagesModule,
-    AdminModule
+    AdminModule,
+    AgentModule
   ]
 })
 export class AppModule {}

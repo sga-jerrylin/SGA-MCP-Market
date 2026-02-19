@@ -35,6 +35,18 @@ export class PackageEntity {
   @Column({ default: 'published' })
   status!: string;
 
+  @Column({ default: 'pending_review' })
+  reviewStatus!: string; // 'pending_review' | 'approved' | 'rejected'
+
+  @Column({ type: 'text', nullable: true })
+  reviewNote!: string | null; // Agent's review note / rejection reason
+
+  @Column({ default: 0 })
+  securityScore!: number; // 0-100, set by agent
+
+  @Column({ type: 'text', nullable: true })
+  agentSummary!: string | null; // Agent-generated description improvement suggestion
+
   @Column({ default: 0 })
   toolsCount!: number;
 

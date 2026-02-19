@@ -6,6 +6,7 @@ import {
   Param,
   Post,
   Put,
+  Query,
   Req,
   UseGuards
 } from '@nestjs/common';
@@ -75,5 +76,22 @@ export class AdminController {
   @Put('announcement')
   updateAnnouncement(@Body() body: { content: string }): Promise<{ content: string }> {
     return this.adminService.updateAnnouncement(body.content);
+  }
+
+  @UseGuards(AdminGuard)
+  @Get('review-queue')
+  async getReviewQueue(@Query('status') status?: string) {
+    const items = await this.adminService.getReviewQueue(status);
+    return { code: 0, message: 'ok', data: items };
+  }
+
+  @UseGuards(AdminGuard)
+  @Post('packages/:id/review')
+  async reviewPackage(
+    @Param('id') id: string,
+    @Body() body: { action: 'approve' | 'reject'; reason?: string }
+  ) {
+    await this.adminService.reviewPackage(id, body.action, body.reason);
+    return { code: 0, message: 'ok' };
   }
 }

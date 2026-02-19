@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { PackageEntity } from '../packages/entities/package.entity';
 import { User } from '../auth/entities/user.entity';
 import { AgentConfig } from './entities/agent-config.entity';
 import { Announcement } from './entities/announcement.entity';
@@ -16,7 +17,8 @@ export class AdminService {
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(AgentConfig) private readonly agentConfigs: Repository<AgentConfig>,
-    @InjectRepository(Announcement) private readonly announcements: Repository<Announcement>
+    @InjectRepository(Announcement) private readonly announcements: Repository<Announcement>,
+    @InjectRepository(PackageEntity) private readonly packages: Repository<PackageEntity>
   ) {}
 
   async listUsers(): Promise<
@@ -101,5 +103,25 @@ export class AdminService {
     }
     const created = await this.announcements.save(this.announcements.create({ content }));
     return { content: created.content };
+  }
+
+  async getReviewQueue(status?: string): Promise<PackageEntity[]> {
+    const where = status
+      ? { reviewStatus: status }
+      : { reviewStatus: In(['pending_review', 'needs_human_review']) };
+    return this.packages.find({ where, order: { publishedAt: 'DESC' } });
+  }
+
+  async reviewPackage(
+    id: string,
+    action: 'approve' | 'reject',
+    reason?: string
+  ): Promise<void> {
+    const pkg = await this.packages.findOne({ where: { id } });
+    if (!pkg) throw new NotFoundException(`Package ${id} not found`);
+    await this.packages.update(id, {
+      reviewStatus: action === 'approve' ? 'approved' : 'rejected',
+      reviewNote: reason ?? null
+    });
   }
 }

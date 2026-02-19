@@ -12,7 +12,10 @@ export class PackagesService {
   ) {}
 
   async list(q?: string, category?: string): Promise<PackageEntity[]> {
-    const qb = this.packagesRepo.createQueryBuilder('pkg').orderBy('pkg.publishedAt', 'DESC');
+    const qb = this.packagesRepo
+      .createQueryBuilder('pkg')
+      .where('pkg.reviewStatus = :reviewStatus', { reviewStatus: 'approved' })
+      .orderBy('pkg.publishedAt', 'DESC');
 
     if (q && q.trim()) {
       qb.andWhere('(pkg.name LIKE :q OR pkg.description LIKE :q)', {
@@ -32,7 +35,14 @@ export class PackagesService {
     if (!item) {
       throw new NotFoundException('package not found');
     }
+    if (item.reviewStatus !== 'approved') {
+      throw new NotFoundException('package not found');
+    }
     return item;
+  }
+
+  async detailInternal(id: string): Promise<PackageEntity | null> {
+    return this.packagesRepo.findOne({ where: { id } });
   }
 
   async publish(
@@ -61,6 +71,7 @@ export class PackagesService {
       category: body.category ?? '其他',
       authorId: userId,
       status: body.status ?? 'published',
+      reviewStatus: 'pending_review',
       toolsCount: body.toolsCount ? Number(body.toolsCount) || 0 : 0,
       downloads: 0,
       sha256

@@ -17,6 +17,9 @@ export class AgentConfig {
   @Column({ type: 'text', nullable: true })
   systemPrompt!: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  webhookUrl!: string | null;
+
   @UpdateDateColumn()
   updatedAt!: Date;
 }
