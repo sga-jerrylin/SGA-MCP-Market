@@ -1,32 +1,46 @@
-<template>
+﻿<template>
   <header class="navbar">
-    <!-- Marquee announcement bar -->
-    <div class="marquee-wrapper">
-      <div class="marquee-track">
-        <span class="marquee-text">{{ announcementText }}</span>
-      </div>
+    <div
+      class="marquee-wrapper"
+      @mouseenter="pauseCarousel"
+      @mouseleave="resumeCarousel"
+    >
+      <div class="marquee-shimmer"></div>
+      <transition name="marquee-fade" mode="out-in">
+        <span class="marquee-text" :key="currentIndex">{{ displayAnnouncement }}</span>
+      </transition>
     </div>
 
-    <!-- Brand row -->
     <div v-if="showBrand" class="navbar-inner">
       <div class="navbar-left">
-        <img src="/logo.jpg" alt="MCP Claw" style="width:36px;height:36px;border-radius:8px;object-fit:cover;flex-shrink:0;" />
+        <img
+          src="/logo.jpg"
+          alt="MCP Claw"
+          style="width: 36px; height: 36px; border-radius: 8px; object-fit: cover; flex-shrink: 0"
+        />
         <span class="brand-text">MCP Market</span>
         <span class="brand-by">by SGA</span>
         <nav v-if="showLinks" class="nav-links">
           <router-link to="/" class="nav-link">首页</router-link>
-          <a href="#" class="nav-link">市场</a>
+          <router-link to="/" class="nav-link">市场</router-link>
           <a href="#" class="nav-link">文档</a>
           <a href="#" class="nav-link">支持</a>
         </nav>
       </div>
+
       <div class="navbar-right">
         <template v-if="isLoggedIn">
-          <router-link v-if="isLoggedIn" to="/tokens" class="nav-token-link">🔑 令牌</router-link>
-          <a v-if="isSuperUser" class="nav-settings-link" @click="router.push('/settings')">⚙️ 设置</a>
+          <router-link to="/tokens" class="nav-token-link">令牌</router-link>
+          <a
+            v-if="isSuperUser"
+            class="nav-settings-link"
+            @click="router.push('/settings')"
+          >
+            设置
+          </a>
           <span class="user-email">{{ userEmail }}</span>
           <span v-if="isSuperUser" class="role-badge super">超级管理员</span>
-          <span v-else-if="isLoggedIn" class="role-badge member">普通用户</span>
+          <span v-else class="role-badge member">普通用户</span>
           <a-button class="logout-btn" @click="logout">Logout</a-button>
         </template>
         <template v-else>
@@ -40,12 +54,27 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import http from '@/utils/http';
 
-const DEFAULT_ANNOUNCEMENT =
-  '🦞 欢迎来到 Claw MCP Market · SGA-Molt 中国社区 MCP 市场 · 工具包正在持续上新中...';
+const DEFAULT_ANNOUNCEMENTS = [
+  '欢迎来到 Claw MCP Market · SGA 社区 MCP 市场 · 工具包持续更新中',
+];
+
+interface AnnouncementItem {
+  id?: number;
+  content?: string;
+  source?: string;
+  priority?: number;
+}
+
+interface AnnouncementResponse {
+  content?: string;
+  text?: string;
+  announcement?: string;
+  items?: AnnouncementItem[];
+}
 
 withDefaults(
   defineProps<{
@@ -57,9 +86,18 @@ withDefaults(
 
 const router = useRouter();
 
-const announcementText = ref(DEFAULT_ANNOUNCEMENT);
+const announcementItems = ref<string[]>([...DEFAULT_ANNOUNCEMENTS]);
+const currentIndex = ref(0);
+const carouselTimer = ref<number | null>(null);
 
-const isLoggedIn = computed(() => !!localStorage.getItem('sga_market_token'));
+const displayAnnouncement = computed(() => {
+  if (!announcementItems.value.length) {
+    return DEFAULT_ANNOUNCEMENTS[0];
+  }
+  return announcementItems.value[currentIndex.value] ?? announcementItems.value[0];
+});
+
+const isLoggedIn = computed(() => Boolean(localStorage.getItem('sga_market_token')));
 
 const userEmail = computed(() => {
   const token = localStorage.getItem('sga_market_token');
@@ -67,11 +105,11 @@ const userEmail = computed(() => {
   try {
     const parts = token.split('.');
     if (parts.length === 3) {
-      const payload = JSON.parse(atob(parts[1]));
-      return (payload.email as string) || (payload.sub as string) || '';
+      const payload = JSON.parse(atob(parts[1])) as { email?: string; sub?: string };
+      return payload.email ?? payload.sub ?? '';
     }
   } catch {
-    // not a JWT
+    return '';
   }
   return '';
 });
@@ -87,32 +125,78 @@ const isSuperUser = computed(() => {
   }
 });
 
-onMounted(async () => {
-  try {
-    const res = await http.get<{ text?: string; announcement?: string } | string>(
-      '/admin/announcement'
-    );
-    const data = res.data;
-    let text = '';
-    if (typeof data === 'string') {
-      text = data;
-    } else if (data && typeof data === 'object') {
-      text = (data as { text?: string; announcement?: string }).text ||
-             (data as { text?: string; announcement?: string }).announcement || '';
+function normalizeAnnouncements(data: AnnouncementResponse | string): string[] {
+  if (typeof data === 'string') {
+    return data
+      .split('|')
+      .map((item: string) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (Array.isArray(data.items) && data.items.length > 0) {
+    const items = data.items
+      .map((item: AnnouncementItem) => (item.content ?? '').trim())
+      .filter(Boolean);
+    if (items.length > 0) {
+      return items;
     }
-    if (text.trim()) {
-      announcementText.value = text.trim();
+  }
+
+  const fallback = data.content ?? data.text ?? data.announcement ?? '';
+  return fallback
+    .split('|')
+    .map((item: string) => item.trim())
+    .filter(Boolean);
+}
+
+function clearCarouselTimer(): void {
+  if (carouselTimer.value !== null) {
+    window.clearInterval(carouselTimer.value);
+    carouselTimer.value = null;
+  }
+}
+
+function resumeCarousel(): void {
+  if (announcementItems.value.length <= 1 || carouselTimer.value !== null) {
+    return;
+  }
+  carouselTimer.value = window.setInterval(() => {
+    currentIndex.value = (currentIndex.value + 1) % announcementItems.value.length;
+  }, 8000);
+}
+
+function pauseCarousel(): void {
+  clearCarouselTimer();
+}
+
+async function loadAnnouncements(): Promise<void> {
+  try {
+    const res = await http.get<AnnouncementResponse | string>('/admin/announcement');
+    const items = normalizeAnnouncements(res.data);
+    if (items.length > 0) {
+      announcementItems.value = items;
+      currentIndex.value = 0;
     }
   } catch {
-    // keep default text on error
+    announcementItems.value = [...DEFAULT_ANNOUNCEMENTS];
+    currentIndex.value = 0;
   }
-});
+}
 
 function logout(): void {
   localStorage.removeItem('sga_market_token');
   localStorage.removeItem('sga_user_info');
   void router.push('/login');
 }
+
+onMounted(async () => {
+  await loadAnnouncements();
+  resumeCarousel();
+});
+
+onUnmounted(() => {
+  clearCarouselTimer();
+});
 </script>
 
 <style scoped>
@@ -124,38 +208,83 @@ function logout(): void {
   border-bottom: 1px solid #1e2230;
 }
 
-/* ── Marquee bar ── */
 .marquee-wrapper {
-  background: linear-gradient(90deg, #1a1d2e, #2d1b69, #1a1d2e);
-  height: 36px;
+  position: relative;
+  height: 48px;
   overflow: hidden;
   display: flex;
   align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  background: linear-gradient(90deg, #1a1d2e, #2d1b69, #1e3a5f, #1a1d2e);
+  background-size: 200% 200%;
+  animation: marquee-gradient 8s ease infinite;
 }
 
-.marquee-track {
-  display: inline-flex;
-  white-space: nowrap;
-  animation: marquee 25s linear infinite;
+.marquee-shimmer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    110deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.08) 35%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+  animation: marquee-shimmer 3.8s linear infinite;
 }
 
 .marquee-text {
-  color: #e0d7ff;
-  font-size: 13px;
+  position: relative;
+  z-index: 1;
+  font-size: 15px;
+  font-weight: 500;
+  color: #e8e0ff;
+  text-align: center;
+  text-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+  max-width: 1200px;
   white-space: nowrap;
-  padding: 0 24px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-@keyframes marquee {
-  from {
-    transform: translateX(100vw);
+.marquee-fade-enter-active,
+.marquee-fade-leave-active {
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.marquee-fade-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.marquee-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+@keyframes marquee-gradient {
+  0% {
+    background-position: 0% 50%;
   }
-  to {
-    transform: translateX(-100%);
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
   }
 }
 
-/* ── Brand row ── */
+@keyframes marquee-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(140%);
+  }
+}
+
 .navbar-inner {
   max-width: 1280px;
   margin: 0 auto;
@@ -259,21 +388,25 @@ function logout(): void {
   font-size: 13px;
   transition: background 0.2s;
 }
+
 .nav-token-link:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
+
 .role-badge {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
   font-weight: 600;
 }
+
 .role-badge.super {
   background: rgba(124, 58, 237, 0.3);
   color: #c4b5fd;
   border: 1px solid rgba(124, 58, 237, 0.4);
 }
+
 .role-badge.member {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.6);

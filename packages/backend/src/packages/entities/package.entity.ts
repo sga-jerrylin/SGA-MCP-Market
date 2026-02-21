@@ -56,6 +56,27 @@ export class PackageEntity {
   @Column({ type: 'text', nullable: true })
   agentSummary!: string | null; // Agent-generated description improvement suggestion
 
+  @Column({ default: 'pending' })
+  pipelineStatus!: string;
+
+  @Column({ type: 'text', nullable: true })
+  enhancedDescription!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  toolsSummary!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  cardImageBase64!: string | null;
+
+  @Column({ nullable: true })
+  autoCategory!: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  pipelineError!: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  pipelineCompletedAt!: Date | null;
+
   @Column({ default: 0 })
   toolsCount!: number;
 

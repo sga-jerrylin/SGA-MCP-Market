@@ -11,6 +11,12 @@ export class AgentConfig {
   @Column({ default: 'claude-sonnet-4-6' })
   model!: string;
 
+  @Column({ default: 'bytedance-seed/seedream-4.5' })
+  imageModel!: string;
+
+  @Column({ default: 'https://openrouter.ai/api/v1' })
+  baseUrl!: string;
+
   @Column({ type: 'text', nullable: true })
   apiKey!: string | null;
 

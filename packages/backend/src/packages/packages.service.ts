@@ -2,18 +2,27 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
 import { Repository } from 'typeorm';
+import { WebhookTriggersService } from '../agent/webhook-triggers.service';
 import { PackageCredentialField, PackageEntity } from './entities/package.entity';
 
 @Injectable()
 export class PackagesService {
   constructor(
     @InjectRepository(PackageEntity)
-    private readonly packagesRepo: Repository<PackageEntity>
+    private readonly packagesRepo: Repository<PackageEntity>,
+    private readonly webhookTriggers: WebhookTriggersService
   ) {}
 
   async list(q?: string, category?: string): Promise<PackageEntity[]> {
     const qb = this.packagesRepo
       .createQueryBuilder('pkg')
+      .select([
+        'pkg.id', 'pkg.name', 'pkg.version', 'pkg.description', 'pkg.category',
+        'pkg.authorId', 'pkg.status', 'pkg.reviewStatus', 'pkg.securityScore',
+        'pkg.agentSummary', 'pkg.pipelineStatus', 'pkg.enhancedDescription',
+        'pkg.toolsSummary', 'pkg.autoCategory', 'pkg.toolsCount', 'pkg.downloads',
+        'pkg.publishedAt'
+      ])
       .where('pkg.reviewStatus = :reviewStatus', { reviewStatus: 'approved' })
       .orderBy('pkg.publishedAt', 'DESC');
 
@@ -80,7 +89,12 @@ export class PackagesService {
       sha256
     });
 
-    return this.packagesRepo.save(entity);
+    const saved = await this.packagesRepo.save(entity);
+
+    void this.webhookTriggers.checkDuplicateName(saved.name).catch(() => undefined);
+    void this.webhookTriggers.checkFirstPublish(userId).catch(() => undefined);
+
+    return saved;
   }
 
   private parseCredentials(raw?: string): PackageCredentialField[] | null {

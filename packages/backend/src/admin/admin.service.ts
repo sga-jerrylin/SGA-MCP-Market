@@ -6,11 +6,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
+import { AgentLog } from '../agent/entities/agent-log.entity';
 import { PackageEntity } from '../packages/entities/package.entity';
 import { User } from '../auth/entities/user.entity';
 import { AgentConfig } from './entities/agent-config.entity';
 import { Announcement } from './entities/announcement.entity';
+import { AnnouncementItem } from './entities/announcement-item.entity';
 
 @Injectable()
 export class AdminService {
@@ -18,7 +20,10 @@ export class AdminService {
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(AgentConfig) private readonly agentConfigs: Repository<AgentConfig>,
     @InjectRepository(Announcement) private readonly announcements: Repository<Announcement>,
-    @InjectRepository(PackageEntity) private readonly packages: Repository<PackageEntity>
+    @InjectRepository(AnnouncementItem)
+    private readonly announcementItems: Repository<AnnouncementItem>,
+    @InjectRepository(PackageEntity) private readonly packages: Repository<PackageEntity>,
+    @InjectRepository(AgentLog) private readonly agentLogs: Repository<AgentLog>
   ) {}
 
   async listUsers(): Promise<
@@ -77,24 +82,79 @@ export class AdminService {
   async updateAgentConfig(dto: {
     enabled?: boolean;
     model?: string;
+    imageModel?: string;
+    baseUrl?: string;
     apiKey?: string;
     systemPrompt?: string;
+    webhookUrl?: string;
   }): Promise<AgentConfig> {
     const config = await this.getAgentConfig();
     if (dto.enabled !== undefined) config.enabled = dto.enabled;
     if (dto.model !== undefined) config.model = dto.model;
-    if (dto.apiKey !== undefined) config.apiKey = dto.apiKey;
+    if (dto.imageModel !== undefined) config.imageModel = dto.imageModel;
+    if (dto.baseUrl !== undefined) config.baseUrl = dto.baseUrl;
+    // 掩码值 (sk-...xxxx) 不应覆盖真实 key
+    if (dto.apiKey !== undefined && !dto.apiKey.startsWith('sk-...')) {
+      config.apiKey = dto.apiKey;
+    }
     if (dto.systemPrompt !== undefined) config.systemPrompt = dto.systemPrompt;
+    if (dto.webhookUrl !== undefined) config.webhookUrl = dto.webhookUrl;
     return this.agentConfigs.save(config);
   }
 
-  async getAnnouncement(): Promise<{ content: string }> {
+  async getAgentLogs(
+    page: number,
+    limit: number,
+    action?: string
+  ): Promise<{ items: AgentLog[]; total: number }> {
+    const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+    const safeLimit =
+      Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 200) : 20;
+
+    const qb = this.agentLogs
+      .createQueryBuilder('log')
+      .orderBy('log.createdAt', 'DESC')
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit);
+
+    if (action && action.trim().length > 0) {
+      qb.where('log.action = :action', { action: action.trim() });
+    }
+
+    const [items, total] = await qb.getManyAndCount();
+    return { items, total };
+  }
+
+  async getAnnouncementItems(): Promise<AnnouncementItem[]> {
+    return this.announcementItems.find({
+      where: { active: true },
+      order: { priority: 'DESC', createdAt: 'DESC' }
+    });
+  }
+
+  async getAnnouncement(): Promise<{
+    content: string;
+    items: Array<{ id: number; content: string; source: string; priority: number }>;
+  }> {
+    const items = await this.getAnnouncementItems();
+    if (items.length > 0) {
+      return {
+        content: items.map((item) => item.content).join(' | '),
+        items: items.map((item) => ({
+          id: item.id,
+          content: item.content,
+          source: item.source,
+          priority: item.priority
+        }))
+      };
+    }
+
     const existing = await this.announcements.findOne({ where: {} });
     if (existing) {
-      return { content: existing.content };
+      return { content: existing.content, items: [] };
     }
     const created = await this.announcements.save(this.announcements.create());
-    return { content: created.content };
+    return { content: created.content, items: [] };
   }
 
   async updateAnnouncement(content: string): Promise<{ content: string }> {
@@ -108,11 +168,23 @@ export class AdminService {
     return { content: created.content };
   }
 
-  async getReviewQueue(status?: string): Promise<PackageEntity[]> {
-    const where = status
-      ? { reviewStatus: status }
-      : { reviewStatus: In(['pending_review', 'needs_human_review']) };
-    return this.packages.find({ where, order: { publishedAt: 'DESC' } });
+  async getReviewQueue(status?: string): Promise<Array<Record<string, unknown>>> {
+    const qb = this.packages.createQueryBuilder('pkg')
+      .leftJoin('pkg.author', 'author')
+      .addSelect(['author.email'])
+      .orderBy('pkg.publishedAt', 'DESC');
+
+    if (status) {
+      qb.where('pkg.reviewStatus = :status', { status });
+    }
+
+    const items = await qb.getMany();
+    return items.map((pkg) => {
+      const authorEmail = (pkg as unknown as { author?: { email?: string } }).author?.email;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { author: _a, ...rest } = pkg as unknown as Record<string, unknown>;
+      return { ...rest, submitter: authorEmail ?? pkg.authorId };
+    });
   }
 
   async reviewPackage(
@@ -126,5 +198,11 @@ export class AdminService {
       reviewStatus: action === 'approve' ? 'approved' : 'rejected',
       reviewNote: reason ?? null
     });
+  }
+
+  async deletePackage(id: string): Promise<void> {
+    const pkg = await this.packages.findOne({ where: { id } });
+    if (!pkg) throw new NotFoundException(`Package ${id} not found`);
+    await this.packages.delete(id);
   }
 }
