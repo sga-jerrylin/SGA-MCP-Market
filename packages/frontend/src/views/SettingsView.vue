@@ -119,11 +119,16 @@
             <a-form layout="vertical" class="agent-form">
               <a-form-item label="文本模型">
                 <a-select v-model:value="agentConfig.model" style="width: 100%" size="large">
-                  <a-select-option value="anthropic/claude-sonnet-4-6">anthropic/claude-sonnet-4-6</a-select-option>
-                  <a-select-option value="anthropic/claude-haiku-4-5">anthropic/claude-haiku-4-5</a-select-option>
-                  <a-select-option value="openai/gpt-4o">openai/gpt-4o</a-select-option>
-                  <a-select-option value="openai/gpt-4o-mini">openai/gpt-4o-mini</a-select-option>
-                  <a-select-option value="google/gemini-2.5-flash">google/gemini-2.5-flash</a-select-option>
+                  <a-select-option value="anthropic/claude-sonnet-4-6">Anthropic — claude-sonnet-4-6</a-select-option>
+                  <a-select-option value="anthropic/claude-haiku-4-5">Anthropic — claude-haiku-4-5</a-select-option>
+                  <a-select-option value="openai/gpt-4o">OpenAI — gpt-4o</a-select-option>
+                  <a-select-option value="openai/gpt-4o-mini">OpenAI — gpt-4o-mini</a-select-option>
+                  <a-select-option value="google/gemini-2.5-flash">Google — gemini-2.5-flash</a-select-option>
+                  <a-select-option value="google/gemini-3-flash-preview">Google — gemini-3-flash-preview</a-select-option>
+                  <a-select-option value="deepseek/deepseek-v3.2">DeepSeek — deepseek-v3.2</a-select-option>
+                  <a-select-option value="z-ai/glm-5">智谱 — GLM-5</a-select-option>
+                  <a-select-option value="minimax/minimax-m2.5">MiniMax — minimax-m2.5</a-select-option>
+                  <a-select-option value="qwen/qwen3.5-397b-a17b">通义 — Qwen3.5-397B</a-select-option>
                 </a-select>
               </a-form-item>
 
