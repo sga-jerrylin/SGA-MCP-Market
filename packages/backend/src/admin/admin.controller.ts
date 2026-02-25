@@ -83,6 +83,10 @@ export class AdminController {
       apiKey?: string;
       systemPrompt?: string;
       webhookUrl?: string;
+      heartbeatMinutes?: number;
+      dailyDigestHour?: number;
+      trendDetectionHour?: number;
+      weeklyExpireDay?: number;
     }
   ): Promise<AgentConfig> {
     return this.adminService.updateAgentConfig(body);
@@ -180,6 +184,10 @@ export class AdminController {
     @Body() body: { action: 'approve' | 'reject'; reason?: string }
   ) {
     await this.adminService.reviewPackage(id, body.action, body.reason);
+    // 人工通过后继续流水线（分类→增强→生图）
+    if (body.action === 'approve') {
+      void this.agentRunner.retryPipeline(id).catch(() => undefined);
+    }
     return { code: 0, message: 'ok' };
   }
 

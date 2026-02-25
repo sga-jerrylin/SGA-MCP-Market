@@ -1,5 +1,5 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+﻿import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, MoreThan, MoreThanOrEqual, Repository } from 'typeorm';
 import { AgentLog } from './entities/agent-log.entity';
@@ -37,7 +37,11 @@ interface EnhanceResult {
 @Injectable()
 export class AgentRunnerService {
   private readonly logger = new Logger(AgentRunnerService.name);
-  private isHeartbeatRunning = false;
+  private isTickRunning = false;
+  private lastHeartbeat = new Date(0);
+  private lastDailyDigest = new Date(0);
+  private lastTrendDetection = new Date(0);
+  private lastWeeklyExpire = new Date(0);
 
   constructor(
     @InjectRepository(PackageEntity) private packages: Repository<PackageEntity>,
@@ -52,128 +56,90 @@ export class AgentRunnerService {
     private readonly webhookTriggers: WebhookTriggersService
   ) {}
 
-  @Cron(CronExpression.EVERY_5_MINUTES)
-  async runHeartbeat(): Promise<void> {
-    if (this.isHeartbeatRunning) return;
-    this.isHeartbeatRunning = true;
+  @Cron('* * * * *')
+  async schedulerTick(): Promise<void> {
+    if (this.isTickRunning) {
+      return;
+    }
+
+    this.isTickRunning = true;
     try {
-      await this.runHeartbeatInner();
+      const config = await this.getConfig();
+      if (!config.enabled) {
+        return;
+      }
+
+      const now = new Date();
+
+      const minutesSinceHeartbeat = (now.getTime() - this.lastHeartbeat.getTime()) / 60000;
+      if (minutesSinceHeartbeat >= (config.heartbeatMinutes || 1440)) {
+        this.lastHeartbeat = now;
+        this.logger.log('[AgentRunner] Heartbeat: scanning pending packages...');
+        await this.reviewPendingPackages(config);
+        await this.updateAnnouncement(config);
+      }
+
+      if (
+        now.getHours() === (config.dailyDigestHour ?? 9) &&
+        now.getMinutes() === 0 &&
+        !this.isSameDay(this.lastDailyDigest, now)
+      ) {
+        this.lastDailyDigest = now;
+        await this.dailyDigest();
+      }
+
+      if (
+        now.getHours() === (config.trendDetectionHour ?? 9) &&
+        now.getMinutes() === 30 &&
+        !this.isSameDay(this.lastTrendDetection, now)
+      ) {
+        this.lastTrendDetection = now;
+        await this.trendDetection();
+      }
+
+      if (
+        now.getDay() === (config.weeklyExpireDay ?? 1) &&
+        now.getHours() === 10 &&
+        now.getMinutes() === 0 &&
+        !this.isSameWeek(this.lastWeeklyExpire, now)
+      ) {
+        this.lastWeeklyExpire = now;
+        await this.weeklyExpireCheck();
+      }
     } finally {
-      this.isHeartbeatRunning = false;
+      this.isTickRunning = false;
     }
   }
 
-  private async runHeartbeatInner(): Promise<void> {
-    const config = await this.getConfig();
-    if (!config.enabled) {
-      return;
-    }
-
-    this.logger.log('[AgentRunner] Heartbeat: scanning pending packages...');
-    await this.reviewPendingPackages(config);
-    await this.updateAnnouncement(config);
+  private isSameDay(a: Date, b: Date): boolean {
+    return (
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+    );
   }
 
-  @Cron('0 9 * * *')
+  private isSameWeek(a: Date, b: Date): boolean {
+    if (a.getTime() === 0) {
+      return false;
+    }
+
+    const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+    return b.getTime() - a.getTime() < msPerWeek;
+  }
+
+  @Cron('0 0 9 * * *')
   async dailyDigest(): Promise<void> {
-    const config = await this.getConfig();
-    if (!config.enabled) {
-      return;
-    }
-
-    const last24Hours = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-
-    const [newToday, pendingReview, activePackages, agentRunsToday] = await Promise.all([
-      this.packages.count({ where: { publishedAt: MoreThanOrEqual(last24Hours) } }),
-      this.packages.count({ where: { reviewStatus: 'pending_review' } }),
-      this.packages.count({ where: { reviewStatus: 'approved' } }),
-      this.agentLogs.count({ where: { createdAt: MoreThanOrEqual(todayStart) } })
-    ]);
-
-    const downloadsRaw = await this.packages
-      .createQueryBuilder('pkg')
-      .select('COALESCE(SUM(pkg.downloads), 0)', 'total')
-      .getRawOne<{ total: string | number }>();
-
-    const totalDownloads = Number(downloadsRaw?.total ?? 0);
-
-    await this.webhookTriggers.sendDailyDigest(config, {
-      newToday,
-      pendingReview,
-      totalDownloads,
-      activePackages,
-      agentRunsToday
-    });
+    await this.webhookTriggers.sendDailyDigest();
   }
 
-  @Cron('0 10 * * 1')
+  @Cron('0 0 9 * * 1')
   async weeklyExpireCheck(): Promise<void> {
-    const config = await this.getConfig();
-    if (!config.enabled || !config.webhookUrl) {
-      return;
-    }
-
-    const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-    const stalePackages = await this.packages.find({
-      where: {
-        reviewStatus: 'approved',
-        publishedAt: LessThan(ninetyDaysAgo)
-      }
-    });
-
-    for (const pkg of stalePackages) {
-      const newerVersion = await this.packages.findOne({
-        where: {
-          name: pkg.name,
-          publishedAt: MoreThan(pkg.publishedAt)
-        },
-        order: {
-          publishedAt: 'DESC'
-        }
-      });
-
-      if (newerVersion) {
-        continue;
-      }
-
-      const daysSince = Math.floor(
-        (Date.now() - new Date(pkg.publishedAt).getTime()) / (24 * 60 * 60 * 1000)
-      );
-
-      const content = [
-        '## ⚠️ [MCP Market] 长期未更新包',
-        `**包名**: ${pkg.name}`,
-        `**最后更新**: ${pkg.publishedAt.toISOString().slice(0, 10)}`,
-        `**天数**: ${daysSince}`,
-        '> 建议联系作者确认维护状态'
-      ].join('\n');
-
-      await this.weCom.sendMessage(config.webhookUrl, content);
-    }
+    await this.webhookTriggers.checkExpiredPackages();
   }
 
-  @Cron('30 9 * * *')
   async trendDetection(): Promise<void> {
-    const config = await this.getConfig();
-    if (!config.enabled || !config.webhookUrl) {
-      return;
-    }
-
-    const topPackages = await this.packages.find({
-      where: { reviewStatus: 'approved' },
-      order: { downloads: 'DESC' },
-      take: 3
-    });
-
-    if (topPackages.length === 0 || topPackages[0].downloads <= 50) {
-      return;
-    }
-
-    const lines = topPackages.map((item, index) => `${index + 1}. ${item.name}（${item.downloads}）`);
-    const content = ['## 📈 [MCP Market] 本周趋势包', ...lines].join('\n');
-    await this.weCom.sendMessage(config.webhookUrl, content);
+    await this.webhookTriggers.detectTrends();
   }
 
   async retryPipeline(packageId: string): Promise<void> {
@@ -182,6 +148,7 @@ export class AgentRunnerService {
     if (!pkg) {
       throw new NotFoundException(`Package ${packageId} not found`);
     }
+
     await this.processPackage(config, pkg);
   }
 
@@ -190,6 +157,7 @@ export class AgentRunnerService {
     if (!config) {
       config = await this.agentConfigs.save(this.agentConfigs.create({ enabled: false }));
     }
+
     return config;
   }
 
@@ -202,13 +170,10 @@ export class AgentRunnerService {
 
   private async processPackage(config: AgentConfig, pkg: PackageEntity): Promise<void> {
     try {
-      const similar = await this.findSimilarPackage(pkg);
-      if (similar) {
-        await this.webhookTriggers.notifySimilarName(config, pkg, similar).catch((error: unknown) => {
-          const msg = error instanceof Error ? error.message : String(error);
-          this.logger.warn(`[AgentRunner] notifySimilarName failed: ${msg}`);
-        });
-      }
+      await this.webhookTriggers.checkDuplicateName(pkg.name).catch((error: unknown) => {
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`[AgentRunner] checkDuplicateName failed: ${msg}`);
+      });
 
       await this.packages.update(pkg.id, {
         pipelineStatus: 'reviewing',
@@ -223,35 +188,36 @@ export class AgentRunnerService {
         agentSummary: reviewResult.summary
       });
 
-      // 统一通过 WebhookTriggersService 处理通知，避免重复
+      if (!reviewResult.approved && config.webhookUrl) {
+        const author = await this.users.findOne({ where: { id: pkg.authorId } });
+        await this.weCom.sendMessage(
+          config.webhookUrl,
+          this.weCom.formatPackageReviewAlert({
+            name: pkg.name,
+            version: pkg.version,
+            authorEmail: author?.email ?? 'unknown',
+            securityScore: reviewResult.score,
+            reviewNote: reviewResult.note
+          })
+        );
+      }
+
       const refreshedAfterReview = await this.packages.findOne({ where: { id: pkg.id } });
       if (refreshedAfterReview) {
-        if (reviewResult.score < 70) {
-          await this.webhookTriggers
-            .notifyLowSecurityScore(config, refreshedAfterReview, reviewResult.score)
-            .catch((error: unknown) => {
-              const msg = error instanceof Error ? error.message : String(error);
-              this.logger.warn(`[AgentRunner] notifyLowSecurityScore failed: ${msg}`);
-            });
-        }
-
-        await this.webhookTriggers.notifyHighCredentials(config, refreshedAfterReview).catch((error) => {
+        await this.webhookTriggers.checkSecurityScore(refreshedAfterReview).catch((error) => {
           const msg = error instanceof Error ? error.message : String(error);
-          this.logger.warn(`[AgentRunner] notifyHighCredentials failed: ${msg}`);
+          this.logger.warn(`[AgentRunner] checkSecurityScore failed: ${msg}`);
         });
 
-        if (refreshedAfterReview.downloads === 100 || refreshedAfterReview.downloads === 500) {
-          await this.webhookTriggers
-            .notifyDownloadMilestone(
-              config,
-              refreshedAfterReview,
-              refreshedAfterReview.downloads
-            )
-            .catch((error: unknown) => {
-              const msg = error instanceof Error ? error.message : String(error);
-              this.logger.warn(`[AgentRunner] notifyDownloadMilestone failed: ${msg}`);
-            });
-        }
+        await this.webhookTriggers.checkCredentials(refreshedAfterReview).catch((error) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`[AgentRunner] checkCredentials failed: ${msg}`);
+        });
+
+        await this.webhookTriggers.checkDownloadMilestone(refreshedAfterReview).catch((error) => {
+          const msg = error instanceof Error ? error.message : String(error);
+          this.logger.warn(`[AgentRunner] checkDownloadMilestone failed: ${msg}`);
+        });
       }
 
       await this.packages.update(pkg.id, { pipelineStatus: 'classifying' });
@@ -262,7 +228,14 @@ export class AgentRunnerService {
       await this.enhanceDescription(config, pkg, categoryForNext);
 
       await this.packages.update(pkg.id, { pipelineStatus: 'imaging' });
-      await this.generateCardImage(config, pkg, categoryForNext);
+      await this.generateLogoImage(config, pkg, categoryForNext).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn('[AgentRunner] Logo gen failed: ' + msg);
+      });
+      await this.generateCardBannerImage(config, pkg, categoryForNext).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn('[AgentRunner] Banner gen failed: ' + msg);
+      });
 
       await this.packages.update(pkg.id, {
         pipelineStatus: 'completed',
@@ -276,18 +249,9 @@ export class AgentRunnerService {
         pipelineError: message
       });
 
-      const recentSince = new Date(Date.now() - 24 * 60 * 60 * 1000);
-      const failCount = await this.agentLogs.count({
-        where: {
-          packageId: pkg.id,
-          status: 'failed',
-          createdAt: MoreThanOrEqual(recentSince)
-        }
-      });
-
-      await this.webhookTriggers.notifyPipelineFailures(config, pkg, failCount).catch((error) => {
+      await this.webhookTriggers.checkPipelineFailures(pkg).catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`[AgentRunner] notifyPipelineFailures failed: ${msg}`);
+        this.logger.warn(`[AgentRunner] checkPipelineFailures failed: ${msg}`);
       });
 
       this.logger.error(`[AgentRunner] Failed to process package ${pkg.id}: ${message}`);
@@ -323,7 +287,33 @@ export class AgentRunnerService {
       return { approved: true, score: 70, note: 'No API key configured, auto-approved', summary: '' };
     }
 
-    const prompt = `You are a security reviewer for an MCP tool package registry. Review this package:\n\nName: ${pkg.name}\nVersion: ${pkg.version}\nDescription: ${pkg.description}\nCategory: ${pkg.category}\nTools count: ${pkg.toolsCount}\n\nEvaluate for:\n1. Security concerns (hardcoded API keys, suspicious patterns, dangerous operations)\n2. Quality (proper description, clear purpose, appropriate category)\n3. Completeness (sufficient metadata)\n\nRespond with JSON only:\n{\n  "approved": boolean,\n  "score": number (0-100),\n  "note": "Brief explanation in Chinese (max 100 chars)",\n  "summary": "Suggested improved description in Chinese (max 200 chars)"\n}`;
+    const descForReview = pkg.enhancedDescription || pkg.description || '(no description provided)';
+    const prompt = [
+      'You are a security reviewer for an MCP tool package registry.',
+      'Your PRIMARY job is security screening. Quality/completeness are SECONDARY.',
+      '',
+      'Package info:',
+      `Name: ${pkg.name}`,
+      `Version: ${pkg.version}`,
+      `Description: ${descForReview}`,
+      `Category: ${pkg.category}`,
+      `Tools count: ${pkg.toolsCount}`,
+      '',
+      'Scoring guidance:',
+      '- Start at 75 for any package with a non-empty description and no red flags.',
+      '- toolsCount=0 is ACCEPTABLE for new/simple packages. Do NOT penalize for this alone.',
+      '- Deduct points only for real security issues: hardcoded secrets, suspicious shell commands, obfuscated code, obvious malware patterns.',
+      '- Minor metadata gaps (missing category, short description) cost at most 10 points total.',
+      '- Score >= 70 means approved=true.',
+      '',
+      'Respond with JSON only:',
+      '{',
+      '  "approved": boolean,',
+      '  "score": number (0-100),',
+      '  "note": "Brief explanation in Chinese (max 100 chars)",',
+      '  "summary": "Suggested improved description in Chinese (max 200 chars)"',
+      '}'
+    ].join('\n');
 
     const startedAt = Date.now();
 
@@ -383,11 +373,27 @@ export class AgentRunnerService {
       return { autoCategory: null };
     }
 
+    const desc = pkg.enhancedDescription || pkg.description || pkg.name;
     const prompt =
-      'You are a package classifier for an MCP tool registry. Given this package:\n' +
-      `Name: ${pkg.name}, Description: ${pkg.description}\n` +
-      "Known categories: ['ERP', 'CRM', '通用', 'AI模型', '文档', '办公工具', '数据库', '开发工具', '监控', '安全', '网络', '存储']\n" +
-      'Return JSON: { "suggestedCategory": "category_name", "confidence": 0.0-1.0 }';
+      'You are a package classifier for an MCP tool registry.\n' +
+      'Pick EXACTLY ONE category from the list below based on the package name and description.\n\n' +
+      'CATEGORY DEFINITIONS:\n' +
+      '- 通用: General-purpose utilities — web search, HTTP requests, data fetching, file conversion, calculators, weather, news, translation, text processing, RSS feeds, URL shortening. When in doubt, use 通用.\n' +
+      '- 办公工具: Office productivity — Word/Excel/PowerPoint/PDF operations, email (Gmail/Outlook), calendar (Google Calendar), meetings (Zoom/Teams/DingTalk), slides, spreadsheets, task management.\n' +
+      '- AI模型: AI/ML services — LLM APIs, image generation (Stable Diffusion/DALL-E/Seedream), speech recognition, TTS, OCR, computer vision, embeddings, model inference.\n' +
+      '- ERP: Enterprise Resource Planning — SAP, Oracle EBS, 金蝶, 用友, inventory, supply chain, manufacturing, HR systems, financial accounting modules.\n' +
+      '- CRM: Customer Relationship Management — Salesforce, HubSpot, customer data, sales pipeline, lead/contact management, support tickets.\n' +
+      '- 数据库: Database operations — SQL queries, NoSQL, Redis, Elasticsearch, data migration, schema management, ORMs, vector databases.\n' +
+      '- 开发工具: Developer tools — Git, GitHub/GitLab, CI/CD, code analysis, testing frameworks, Docker, Kubernetes, package managers, IDE integrations, code generation.\n' +
+      '- 监控: Observability — logging (Datadog/Grafana/Prometheus), metrics, alerting, APM, performance tracking, error tracking (Sentry), uptime monitoring.\n' +
+      '- 安全: Security — authentication, OAuth, JWT, encryption, vulnerability scanning, secrets management, access control, WAF, SIEM.\n' +
+      '- 网络: Networking — HTTP client, API gateway, DNS, load balancing, proxies, WebSocket, gRPC, network diagnostics.\n' +
+      '- 存储: File/object storage — S3, MinIO, HDFS, file upload/download, cloud drives (Google Drive/OneDrive/Dropbox), backup.\n' +
+      '- 电商: E-commerce — Shopify, WooCommerce, product catalog, orders, payments, inventory, logistics tracking.\n' +
+      '- 其他: Only use when nothing else fits.\n\n' +
+      `Package name: ${pkg.name}\n` +
+      `Description: ${desc.slice(0, 300)}\n\n` +
+      'Return JSON only: { "suggestedCategory": "<one of the category names above>", "confidence": 0.0-1.0 }';
 
     try {
       const raw = await this.openRouter.chatCompletion({
@@ -410,12 +416,14 @@ export class AgentRunnerService {
 
       const suggestedCategory = parsed.suggestedCategory.trim();
       const confidence = parsed.confidence;
-      const shouldApply =
-        suggestedCategory.length > 0 && confidence > 0.8 && suggestedCategory !== pkg.category;
+      // Always persist the AI suggestion; update category field when confidence is sufficient
+      const updateCategory = suggestedCategory.length > 0 && confidence >= 0.6;
 
-      if (shouldApply) {
-        await this.packages.update(pkg.id, { autoCategory: suggestedCategory });
+      const updatePayload: Partial<PackageEntity> = { autoCategory: suggestedCategory };
+      if (updateCategory) {
+        updatePayload.category = suggestedCategory;
       }
+      await this.packages.update(pkg.id, updatePayload);
 
       await this.saveLog({
         packageId: pkg.id,
@@ -426,11 +434,11 @@ export class AgentRunnerService {
           model: config.model,
           suggestedCategory,
           confidence,
-          applied: shouldApply
+          applied: updateCategory
         }
       });
 
-      return { autoCategory: shouldApply ? suggestedCategory : null };
+      return { autoCategory: suggestedCategory || null };
     } catch (error) {
       await this.saveLog({
         packageId: pkg.id,
@@ -532,7 +540,69 @@ export class AgentRunnerService {
     }
   }
 
-  private async generateCardImage(
+  private async generateLogoImage(
+    config: AgentConfig,
+    pkg: PackageEntity,
+    category: string
+  ): Promise<void> {
+    const startedAt = Date.now();
+
+    if (!config.apiKey) {
+      await this.packages.update(pkg.id, { logoBase64: null });
+      await this.saveLog({
+        packageId: pkg.id,
+        action: 'logo',
+        status: 'success',
+        durationMs: Date.now() - startedAt,
+        detail: { skipped: true, reason: 'apiKey missing' }
+      });
+      return;
+    }
+
+    const categoryThemeColors: Record<string, string> = {
+      'developer-tools': 'electric blue and cyan',
+      data: 'deep purple and violet',
+      ai: 'gold and orange',
+      security: 'dark red and crimson',
+      productivity: 'emerald green and teal',
+      communication: 'magenta and pink',
+      开发工具: 'electric blue and cyan',
+      数据库: 'deep purple and violet',
+      监控: 'amber and cyan',
+      安全: 'dark red and crimson',
+      通用: 'neon purple and deep blue'
+    };
+    const themeColor = categoryThemeColors[category] ?? 'neon purple and deep blue';
+
+    const toolDesc = (pkg.enhancedDescription || pkg.description || pkg.name).slice(0, 80);
+    const prompt =
+      `App icon for MCP tool "${pkg.name}": ${toolDesc}. ` +
+      `Visual concept: abstract symbol representing the tool's core function, combined with a stylized lobster/crayfish claw motif (Claw MCP brand). ` +
+      `Color palette: ${themeColor}. Dark background. Flat icon design, no text, no letters, no gradients that obscure the symbol. ` +
+      'Perfect square format, bold single focal element, clearly recognizable at 64x64 px.';
+
+    const base64 = await this.openRouter.generateImage({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.imageModel,
+      prompt,
+      size: '512x512'
+    });
+
+    await this.packages.update(pkg.id, {
+      logoBase64: `data:image/png;base64,${base64}`
+    });
+
+    await this.saveLog({
+      packageId: pkg.id,
+      action: 'logo',
+      status: 'success',
+      durationMs: Date.now() - startedAt,
+      detail: { model: config.imageModel, generated: true }
+    });
+  }
+
+  private async generateCardBannerImage(
     config: AgentConfig,
     pkg: PackageEntity,
     category: string
@@ -551,44 +621,49 @@ export class AgentRunnerService {
       return;
     }
 
-    const prompt = `为MCP工具'${pkg.name}'生成现代科技风卡片图标。分类:${category}。深色背景，渐变色调，简洁线条，无文字。正方形。`;
+    const categoryThemes: Record<string, string> = {
+      'developer-tools': 'electric blue and cyan circuit board patterns, terminal green accents',
+      data: 'deep purple and violet data stream visualization, flowing particles',
+      ai: 'neural network nodes in gold and orange, pulsing connections',
+      security: 'dark red and crimson shield motifs, hexagonal lock patterns',
+      productivity: 'emerald green and teal workflow arrows, minimalist icons',
+      communication: 'magenta and pink signal waves, dynamic speech bubbles',
+      开发工具: 'electric blue and cyan circuit board patterns, terminal green accents',
+      数据库: 'deep purple and violet data stream visualization, flowing particles',
+      监控: 'amber and cyan telemetry waveforms with dashboard-like glow',
+      安全: 'dark red and crimson shield motifs, hexagonal lock patterns',
+      通用: 'neon purple and deep blue gradient, abstract tech symbols'
+    };
+    const theme = categoryThemes[category] ?? 'neon purple and deep blue gradient, abstract tech symbols';
 
-    try {
-      const base64 = await this.openRouter.generateImage({
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        model: config.imageModel,
-        prompt,
-        size: '512x512'
-      });
+    const bannerDesc = (pkg.enhancedDescription || pkg.description || pkg.name).slice(0, 60);
+    const prompt =
+      `Horizontal banner artwork for a developer tool card. Tool: "${pkg.name}" — ${bannerDesc}. ` +
+      `Visual theme: ${theme}. ` +
+      'Style: wide cinematic banner (16:9 ratio feel), dark immersive background with depth. ' +
+      'Abstract tech atmosphere: flowing particles, circuit traces, light streaks — no sharp icons, no focal center. ' +
+      'Subtle lobster claw silhouette as a watermark in one corner (Claw MCP brand). ' +
+      'No text, no letters, no faces, no UI elements. Professional developer ecosystem aesthetic.';
 
-      await this.packages.update(pkg.id, {
-        cardImageBase64: `data:image/png;base64,${base64}`
-      });
+    const base64 = await this.openRouter.generateImage({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.imageModel,
+      prompt,
+      size: '512x512'
+    });
 
-      await this.saveLog({
-        packageId: pkg.id,
-        action: 'image',
-        status: 'success',
-        durationMs: Date.now() - startedAt,
-        detail: { model: config.imageModel, generated: true }
-      });
-    } catch (error) {
-      await this.packages.update(pkg.id, { cardImageBase64: null });
-      await this.saveLog({
-        packageId: pkg.id,
-        action: 'image',
-        status: 'failed',
-        durationMs: Date.now() - startedAt,
-        detail: {
-          model: config.imageModel,
-          error: error instanceof Error ? error.message : String(error)
-        }
-      });
-      this.logger.warn(
-        `[AgentRunner] Image generation failed for package ${pkg.id}, continuing pipeline`
-      );
-    }
+    await this.packages.update(pkg.id, {
+      cardImageBase64: `data:image/png;base64,${base64}`
+    });
+
+    await this.saveLog({
+      packageId: pkg.id,
+      action: 'image',
+      status: 'success',
+      durationMs: Date.now() - startedAt,
+      detail: { model: config.imageModel, generated: true }
+    });
   }
 
   private parseJsonBlock<T extends object>(text: string): T | null {

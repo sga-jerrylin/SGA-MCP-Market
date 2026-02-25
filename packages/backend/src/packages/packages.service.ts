@@ -1,16 +1,22 @@
-﻿import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
 import { Repository } from 'typeorm';
+import { AgentRunnerService } from '../agent/agent-runner.service';
 import { WebhookTriggersService } from '../agent/webhook-triggers.service';
+import { MinioService } from '../storage/minio.service';
 import { PackageCredentialField, PackageEntity } from './entities/package.entity';
 
 @Injectable()
 export class PackagesService {
+  private readonly logger = new Logger(PackagesService.name);
+
   constructor(
     @InjectRepository(PackageEntity)
     private readonly packagesRepo: Repository<PackageEntity>,
-    private readonly webhookTriggers: WebhookTriggersService
+    private readonly agentRunner: AgentRunnerService,
+    private readonly webhookTriggers: WebhookTriggersService,
+    private readonly minio: MinioService
   ) {}
 
   async list(q?: string, category?: string): Promise<PackageEntity[]> {
@@ -21,7 +27,7 @@ export class PackagesService {
         'pkg.authorId', 'pkg.status', 'pkg.reviewStatus', 'pkg.securityScore',
         'pkg.agentSummary', 'pkg.pipelineStatus', 'pkg.enhancedDescription',
         'pkg.toolsSummary', 'pkg.autoCategory', 'pkg.toolsCount', 'pkg.downloads',
-        'pkg.publishedAt'
+        'pkg.publishedAt', 'pkg.cardImageBase64', 'pkg.logoBase64'
       ])
       .where('pkg.reviewStatus = :reviewStatus', { reviewStatus: 'approved' })
       .orderBy('pkg.publishedAt', 'DESC');
@@ -91,8 +97,18 @@ export class PackagesService {
 
     const saved = await this.packagesRepo.save(entity);
 
+    if (file?.buffer) {
+      await this.minio.putObject(`${saved.id}/package.tgz`, file.buffer);
+    }
+
     void this.webhookTriggers.checkDuplicateName(saved.name).catch(() => undefined);
     void this.webhookTriggers.checkFirstPublish(userId).catch(() => undefined);
+
+    // 上传即触发流水线（fire-and-forget）
+    void this.agentRunner.retryPipeline(saved.id).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[PackagesService] Pipeline trigger failed for ${saved.id}: ${msg}`);
+    });
 
     return saved;
   }

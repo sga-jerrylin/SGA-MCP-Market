@@ -5,7 +5,7 @@ export class AgentLog {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   packageId!: string | null;
 
   @Column()

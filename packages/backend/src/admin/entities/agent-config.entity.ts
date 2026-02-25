@@ -26,6 +26,18 @@ export class AgentConfig {
   @Column({ type: 'text', nullable: true })
   webhookUrl!: string | null;
 
+  @Column({ default: 1440 })
+  heartbeatMinutes!: number;
+
+  @Column({ default: 9 })
+  dailyDigestHour!: number;
+
+  @Column({ default: 9 })
+  trendDetectionHour!: number;
+
+  @Column({ default: 1 })
+  weeklyExpireDay!: number; // 0=Sun, 1=Mon, ..., 6=Sat
+
   @UpdateDateColumn()
   updatedAt!: Date;
 }

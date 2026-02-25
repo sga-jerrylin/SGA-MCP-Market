@@ -5,10 +5,19 @@
       @mouseenter="pauseCarousel"
       @mouseleave="resumeCarousel"
     >
-      <div class="marquee-shimmer"></div>
-      <transition name="marquee-fade" mode="out-in">
-        <span class="marquee-text" :key="currentIndex">{{ displayAnnouncement }}</span>
-      </transition>
+      <div class="marquee-scanlines"></div>
+      <div class="marquee-glow-left"></div>
+      <div class="marquee-glow-right"></div>
+      <div class="marquee-track" :class="{ 'marquee-paused': isPaused }">
+        <span
+          v-for="(item, i) in tickerItems"
+          :key="i"
+          class="marquee-item"
+        >
+          <span class="marquee-bullet">◈</span>
+          {{ item }}
+        </span>
+      </div>
     </div>
 
     <div v-if="showBrand" class="navbar-inner">
@@ -37,6 +46,7 @@
             @click="router.push('/settings')"
           >
             设置
+            <span v-if="pendingReviewCount > 0" class="review-badge">{{ pendingReviewCount }}</span>
           </a>
           <span class="user-email">{{ userEmail }}</span>
           <span v-if="isSuperUser" class="role-badge super">超级管理员</span>
@@ -86,9 +96,32 @@ withDefaults(
 
 const router = useRouter();
 
+const pendingReviewCount = ref(0);
+
+async function loadPendingReviewCount(): Promise<void> {
+  if (!isSuperUser.value) return;
+  try {
+    const res = await http.get<{ data?: unknown[] }>('/admin/review-queue?status=pending_review');
+    const data = res.data?.data;
+    pendingReviewCount.value = Array.isArray(data) ? data.length : 0;
+  } catch {
+    pendingReviewCount.value = 0;
+  }
+}
+
 const announcementItems = ref<string[]>([...DEFAULT_ANNOUNCEMENTS]);
 const currentIndex = ref(0);
 const carouselTimer = ref<number | null>(null);
+const isPaused = ref(false);
+
+// Repeat items enough times to fill ticker seamlessly
+const tickerItems = computed(() => {
+  const items = announcementItems.value.length > 0 ? announcementItems.value : DEFAULT_ANNOUNCEMENTS;
+  const repeated: string[] = [];
+  const times = Math.max(6, Math.ceil(24 / items.length));
+  for (let i = 0; i < times; i++) repeated.push(...items);
+  return repeated;
+});
 
 const displayAnnouncement = computed(() => {
   if (!announcementItems.value.length) {
@@ -157,6 +190,7 @@ function clearCarouselTimer(): void {
 }
 
 function resumeCarousel(): void {
+  isPaused.value = false;
   if (announcementItems.value.length <= 1 || carouselTimer.value !== null) {
     return;
   }
@@ -166,6 +200,7 @@ function resumeCarousel(): void {
 }
 
 function pauseCarousel(): void {
+  isPaused.value = true;
   clearCarouselTimer();
 }
 
@@ -192,6 +227,7 @@ function logout(): void {
 onMounted(async () => {
   await loadAnnouncements();
   resumeCarousel();
+  void loadPendingReviewCount();
 });
 
 onUnmounted(() => {
@@ -201,7 +237,7 @@ onUnmounted(() => {
 
 <style scoped>
 .navbar {
-  background: #0f1117;
+  background: #0a0c14;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -212,77 +248,113 @@ onUnmounted(() => {
   position: relative;
   height: 48px;
   overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 20px;
-  background: linear-gradient(90deg, #1a1d2e, #2d1b69, #1e3a5f, #1a1d2e);
-  background-size: 200% 200%;
-  animation: marquee-gradient 8s ease infinite;
+  background: #06080f;
+  border-bottom: 2px solid rgba(0, 255, 200, 0.25);
+  box-shadow:
+    inset 0 -1px 0 rgba(0, 255, 200, 0.1),
+    0 2px 24px rgba(0, 200, 255, 0.08);
 }
 
-.marquee-shimmer {
+/* Scanlines overlay */
+.marquee-scanlines {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: linear-gradient(
-    110deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.08) 35%,
-    transparent 70%
+  z-index: 3;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.15) 2px,
+    rgba(0, 0, 0, 0.15) 4px
   );
-  transform: translateX(-120%);
-  animation: marquee-shimmer 3.8s linear infinite;
 }
 
-.marquee-text {
-  position: relative;
-  z-index: 1;
-  font-size: 15px;
-  font-weight: 500;
-  color: #e8e0ff;
-  text-align: center;
-  text-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
-  max-width: 1200px;
+/* Edge fade masks */
+.marquee-glow-left,
+.marquee-glow-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 80px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.marquee-glow-left {
+  left: 0;
+  background: linear-gradient(90deg, #06080f 0%, transparent 100%);
+}
+
+.marquee-glow-right {
+  right: 0;
+  background: linear-gradient(270deg, #06080f 0%, transparent 100%);
+}
+
+/* Scrolling track */
+.marquee-track {
+  display: flex;
+  align-items: center;
+  height: 100%;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  animation: ticker-scroll 60s linear infinite;
+  will-change: transform;
 }
 
-.marquee-fade-enter-active,
-.marquee-fade-leave-active {
-  transition: opacity 0.35s ease, transform 0.35s ease;
+.marquee-track.marquee-paused {
+  animation-play-state: paused;
 }
 
-.marquee-fade-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
+.marquee-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #00ffe0;
+  text-shadow:
+    0 0 10px rgba(0, 255, 224, 1),
+    0 0 30px rgba(0, 255, 224, 0.5),
+    0 0 60px rgba(0, 255, 224, 0.2);
+  padding: 0 40px;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
 }
 
-.marquee-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
+/* Alternating color for visual variety */
+.marquee-item:nth-child(3n + 2) {
+  color: #ff79c6;
+  text-shadow:
+    0 0 10px rgba(255, 121, 198, 1),
+    0 0 30px rgba(255, 121, 198, 0.5),
+    0 0 60px rgba(255, 121, 198, 0.2);
 }
 
-@keyframes marquee-gradient {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
+.marquee-item:nth-child(3n + 3) {
+  color: #f1fa8c;
+  text-shadow:
+    0 0 10px rgba(241, 250, 140, 1),
+    0 0 30px rgba(241, 250, 140, 0.4);
 }
 
-@keyframes marquee-shimmer {
-  0% {
-    transform: translateX(-120%);
-  }
-  100% {
-    transform: translateX(140%);
-  }
+.marquee-bullet {
+  color: #ff79c6;
+  text-shadow:
+    0 0 8px rgba(255, 121, 198, 1),
+    0 0 20px rgba(255, 121, 198, 0.6);
+  font-size: 14px;
+  animation: bullet-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes ticker-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes bullet-pulse {
+  0%, 100% { opacity: 1; transform: scale(1) rotate(0deg); }
+  50% { opacity: 0.6; transform: scale(0.85) rotate(180deg); }
 }
 
 .navbar-inner {
@@ -344,6 +416,7 @@ onUnmounted(() => {
 }
 
 .nav-settings-link {
+  position: relative;
   color: #c4b5fd;
   font-size: 13px;
   cursor: pointer;
@@ -356,6 +429,29 @@ onUnmounted(() => {
 .nav-settings-link:hover {
   background: rgba(196, 181, 253, 0.12);
   color: #ddd6fe;
+}
+
+.review-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 999px;
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: badge-pop 0.3s ease;
+}
+
+@keyframes badge-pop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); }
 }
 
 .user-email {

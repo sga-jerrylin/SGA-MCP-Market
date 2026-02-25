@@ -1,4 +1,4 @@
-﻿import {
+import {
   Column,
   CreateDateColumn,
   Entity,
@@ -68,7 +68,10 @@ export class PackageEntity {
   @Column({ type: 'text', nullable: true })
   cardImageBase64!: string | null;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true, default: null })
+  logoBase64!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
   autoCategory!: string | null;
 
   @Column({ type: 'text', nullable: true })

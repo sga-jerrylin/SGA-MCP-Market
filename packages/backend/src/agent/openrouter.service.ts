@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+﻿import { Injectable, Logger } from '@nestjs/common';
 
 interface ChatMessage {
   role: string;
@@ -75,29 +75,76 @@ export class OpenRouterService {
     throw new Error('OpenRouter chat completion returned empty content');
   }
 
-  async generateImage(options: ImageGenerationOptions): Promise<string> {
-    const endpoint = `${this.normalizeBaseUrl(options.baseUrl)}/images/generations`;
+    async generateImage(options: ImageGenerationOptions): Promise<string> {
+    const endpoint = `${this.normalizeBaseUrl(options.baseUrl)}/chat/completions`;
     const payload = await this.requestWithRetry({
       endpoint,
       apiKey: options.apiKey,
       body: {
         model: options.model,
-        prompt: options.prompt,
-        n: 1,
-        size: options.size ?? '1024x1024',
-        response_format: 'b64_json'
+        messages: [{ role: 'user', content: options.prompt }],
+        modalities: ['image']
       }
     });
 
-    const rows = Array.isArray(payload.data) ? payload.data : [];
-    const firstRow = asRecord(rows[0]);
-    const imageBase64 = asString(firstRow.b64_json);
-    if (!imageBase64) {
-      throw new Error('OpenRouter image generation returned empty b64_json');
-    }
-    return imageBase64;
-  }
+    const toBase64 = (value: string): string =>
+      value.startsWith('data:') ? (value.split(',')[1] ?? '') : value;
 
+    const choices = Array.isArray(payload.choices) ? payload.choices : [];
+    const firstChoice = asRecord(choices[0]);
+    const message = asRecord(firstChoice.message);
+
+    // 1) choices[0].message.images[0].image_url.url
+    const images = Array.isArray(message.images) ? message.images : [];
+    const firstImage = asRecord(images[0]);
+    const imageUrlObj = asRecord(firstImage.image_url);
+    const imageUrl = asString(imageUrlObj.url);
+    if (imageUrl) {
+      const base64 = toBase64(imageUrl);
+      if (base64) {
+        return base64;
+      }
+    }
+
+    // 2) choices[0].message.content[] with type==='image_url'
+    const content = message.content;
+    if (Array.isArray(content)) {
+      for (const item of content) {
+        const rec = asRecord(item);
+        if (asString(rec.type) !== 'image_url') {
+          continue;
+        }
+        const url = asString(asRecord(rec.image_url).url);
+        if (url) {
+          const base64 = toBase64(url);
+          if (base64) {
+            return base64;
+          }
+        }
+      }
+    }
+
+    // 3) data[0].b64_json
+    const data = Array.isArray(payload.data) ? payload.data : [];
+    const firstData = asRecord(data[0]);
+    const b64 = asString(firstData.b64_json);
+    if (b64) {
+      return b64;
+    }
+
+    // 4) data[0].url -> fetch and convert to base64
+    const dataUrl = asString(firstData.url);
+    if (dataUrl) {
+      const response = await fetch(dataUrl);
+      if (!response.ok) {
+        throw new Error(`Image URL fetch failed (${response.status})`);
+      }
+      const buf = await response.arrayBuffer();
+      return Buffer.from(buf).toString('base64');
+    }
+
+    throw new Error('OpenRouter image generation returned no image data');
+  }
   private normalizeBaseUrl(url: string): string {
     return url.replace(/\/+$/, '');
   }
@@ -128,8 +175,7 @@ export class OpenRouterService {
           body: JSON.stringify(options.body)
         });
       } catch (networkError) {
-        // 网络错误 — 可重试
-        lastError = networkError instanceof Error ? networkError : new Error(String(networkError));
+        // 缃戠粶閿欒 鈥?鍙噸璇?        lastError = networkError instanceof Error ? networkError : new Error(String(networkError));
         if (attempt === 0) {
           this.logger.warn('OpenRouter network error, retrying once after 2s');
           await this.sleep(2000);
@@ -148,7 +194,7 @@ export class OpenRouterService {
           await this.sleep(2000);
           continue;
         }
-        // 不可重试的 HTTP 错误 (400/401/403 等) — 直接抛出，不重试
+        // 涓嶅彲閲嶈瘯鐨?HTTP 閿欒 (400/401/403 绛? 鈥?鐩存帴鎶涘嚭锛屼笉閲嶈瘯
         throw new Error(`OpenRouter request failed (${response.status}): ${text}`);
       }
 
@@ -163,4 +209,5 @@ export class OpenRouterService {
     await new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
+
 

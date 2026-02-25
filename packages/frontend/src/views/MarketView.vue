@@ -67,10 +67,14 @@
                 <span class="pkg-version">v{{ item.version }}</span>
                 <span v-if="hasAiEnhancement(item)" class="ai-badge">AI ✨</span>
               </div>
+              <div class="pkg-image-logo" v-if="item.logoBase64">
+                <img :src="item.logoBase64" alt="" />
+              </div>
             </div>
 
             <div v-else class="card-top">
-              <div class="pkg-icon" :style="{ background: getIconGradient(item.name) }">
+              <img v-if="item.logoBase64" :src="item.logoBase64" class="pkg-icon-img" alt="" />
+              <div v-else class="pkg-icon" :style="{ background: getIconGradient(item.name) }">
                 {{ item.name.charAt(0).toUpperCase() }}
               </div>
               <div class="pkg-title-wrap">
@@ -138,6 +142,7 @@ interface MarketItem {
   description: string;
   enhancedDescription?: string | null;
   cardImageBase64?: string | null;
+  logoBase64?: string | null;
   autoCategory?: string | null;
   pipelineStatus?: string | null;
   category: string;
@@ -507,6 +512,26 @@ onMounted(() => {
   align-items: center;
 }
 
+.pkg-image-logo {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+  background: #0a0c14;
+  z-index: 1;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.pkg-image-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .card-top {
   display: flex;
   align-items: center;
@@ -524,6 +549,14 @@ onMounted(() => {
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.pkg-icon-img {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
 .pkg-icon {

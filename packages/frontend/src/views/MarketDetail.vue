@@ -14,8 +14,9 @@
         <template v-if="item">
           <div class="header-card">
             <div class="header-main">
+              <img v-if="item.logoBase64" :src="item.logoBase64" class="pkg-icon-img" alt="" />
               <div
-                v-if="item.cardImageBase64"
+                v-else-if="item.cardImageBase64"
                 class="pkg-image"
                 :style="{ backgroundImage: `url(${item.cardImageBase64})` }"
               ></div>
@@ -223,6 +224,7 @@ interface MarketItem {
   pipelineStatus?: string | null;
   toolsSummary?: string | null;
   cardImageBase64?: string | null;
+  logoBase64?: string | null;
   securityScore?: number | null;
   category: string;
   status: string;
@@ -435,6 +437,14 @@ onMounted(() => {
   border-radius: 16px;
   background-size: cover;
   background-position: center;
+  flex-shrink: 0;
+}
+
+.pkg-icon-img {
+  width: 80px;
+  height: 80px;
+  border-radius: 14px;
+  object-fit: cover;
   flex-shrink: 0;
 }
 

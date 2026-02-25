@@ -6,7 +6,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { AgentLog } from '../agent/entities/agent-log.entity';
 import { PackageEntity } from '../packages/entities/package.entity';
 import { User } from '../auth/entities/user.entity';
@@ -87,6 +87,10 @@ export class AdminService {
     apiKey?: string;
     systemPrompt?: string;
     webhookUrl?: string;
+    heartbeatMinutes?: number;
+    dailyDigestHour?: number;
+    trendDetectionHour?: number;
+    weeklyExpireDay?: number;
   }): Promise<AgentConfig> {
     const config = await this.getAgentConfig();
     if (dto.enabled !== undefined) config.enabled = dto.enabled;
@@ -99,6 +103,10 @@ export class AdminService {
     }
     if (dto.systemPrompt !== undefined) config.systemPrompt = dto.systemPrompt;
     if (dto.webhookUrl !== undefined) config.webhookUrl = dto.webhookUrl;
+    if (typeof dto.heartbeatMinutes === 'number') config.heartbeatMinutes = dto.heartbeatMinutes;
+    if (typeof dto.dailyDigestHour === 'number') config.dailyDigestHour = dto.dailyDigestHour;
+    if (typeof dto.trendDetectionHour === 'number') config.trendDetectionHour = dto.trendDetectionHour;
+    if (typeof dto.weeklyExpireDay === 'number') config.weeklyExpireDay = dto.weeklyExpireDay;
     return this.agentConfigs.save(config);
   }
 
@@ -174,7 +182,12 @@ export class AdminService {
       .addSelect(['author.email'])
       .orderBy('pkg.publishedAt', 'DESC');
 
-    if (status) {
+    if (status === 'pending_review') {
+      // 待审核 = 未处理 + 需人工介入的
+      qb.where('pkg.reviewStatus IN (:...statuses)', {
+        statuses: ['pending_review', 'needs_human_review']
+      });
+    } else if (status) {
       qb.where('pkg.reviewStatus = :status', { status });
     }
 

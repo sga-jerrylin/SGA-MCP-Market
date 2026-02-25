@@ -182,6 +182,49 @@
                 </div>
               </a-form-item>
 
+              <div class="schedule-section">
+                <h4 class="schedule-title">定时任务调度</h4>
+                <div class="schedule-grid">
+                  <a-form-item label="心跳间隔（兜底扫描，上传已即时触发）">
+                    <a-select v-model:value="agentConfig.heartbeatMinutes" style="width: 100%" size="large">
+                      <a-select-option :value="30">30 分钟</a-select-option>
+                      <a-select-option :value="60">1 小时</a-select-option>
+                      <a-select-option :value="360">6 小时</a-select-option>
+                      <a-select-option :value="720">12 小时</a-select-option>
+                      <a-select-option :value="1440">24 小时</a-select-option>
+                    </a-select>
+                  </a-form-item>
+
+                  <a-form-item label="每日摘要时间">
+                    <a-select v-model:value="agentConfig.dailyDigestHour" style="width: 100%" size="large">
+                      <a-select-option v-for="h in 24" :key="h - 1" :value="h - 1">
+                        {{ String(h - 1).padStart(2, '0') }}:00
+                      </a-select-option>
+                    </a-select>
+                  </a-form-item>
+
+                  <a-form-item label="趋势检测时间">
+                    <a-select v-model:value="agentConfig.trendDetectionHour" style="width: 100%" size="large">
+                      <a-select-option v-for="h in 24" :key="h - 1" :value="h - 1">
+                        {{ String(h - 1).padStart(2, '0') }}:30
+                      </a-select-option>
+                    </a-select>
+                  </a-form-item>
+
+                  <a-form-item label="过期检查（每周）">
+                    <a-select v-model:value="agentConfig.weeklyExpireDay" style="width: 100%" size="large">
+                      <a-select-option :value="1">周一 10:00</a-select-option>
+                      <a-select-option :value="2">周二 10:00</a-select-option>
+                      <a-select-option :value="3">周三 10:00</a-select-option>
+                      <a-select-option :value="4">周四 10:00</a-select-option>
+                      <a-select-option :value="5">周五 10:00</a-select-option>
+                      <a-select-option :value="6">周六 10:00</a-select-option>
+                      <a-select-option :value="0">周日 10:00</a-select-option>
+                    </a-select>
+                  </a-form-item>
+                </div>
+              </div>
+
               <div class="form-actions">
                 <a-button type="primary" size="large" :loading="agentSaving" @click="saveAgent">
                   保存设置
@@ -192,6 +235,14 @@
           <div v-show="activeTab === 'agentLogs'" class="tab-panel">
             <div class="panel-header">
               <h2 class="panel-title">Agent 日志</h2>
+              <div class="panel-header-actions">
+                <a-button size="small" :loading="agentLogsLoading" @click="loadAgentLogs(agentLogPage)">刷新</a-button>
+                <a-button
+                  size="small"
+                  :type="autoRefresh ? 'primary' : 'default'"
+                  @click="toggleAutoRefresh"
+                >自动刷新 {{ autoRefresh ? 'ON' : 'OFF' }}</a-button>
+              </div>
             </div>
 
             <a-table
@@ -208,7 +259,13 @@
                   {{ actionLabel(record.action) }}
                 </template>
                 <template v-if="column.key === 'status'">
-                  <a-tag :color="record.status === 'success' ? 'green' : 'red'">
+                  <a-tooltip
+                    v-if="record.status !== 'success' && record.detail"
+                    :title="typeof record.detail === 'object' ? (record.detail.error || JSON.stringify(record.detail)) : String(record.detail)"
+                  >
+                    <a-tag color="red" style="cursor: help">failed ⓘ</a-tag>
+                  </a-tooltip>
+                  <a-tag v-else :color="record.status === 'success' ? 'green' : 'red'">
                     {{ record.status === 'success' ? 'success' : 'failed' }}
                   </a-tag>
                 </template>
@@ -266,6 +323,7 @@
           <div v-show="activeTab === 'review'" class="tab-panel">
             <div class="panel-header">
               <h2 class="panel-title">包审核队列</h2>
+              <a-button size="small" :loading="reviewLoading" style="margin-left: auto" @click="loadReviewQueue(reviewFilter)">刷新</a-button>
             </div>
 
             <div class="review-filters">
@@ -283,6 +341,7 @@
               row-key="id"
               size="middle"
               :pagination="false"
+              :scroll="{ x: 950 }"
               class="settings-table"
             >
               <template #bodyCell="{ column, record }">
@@ -298,6 +357,7 @@
                   <a-tag :color="pipelineTagColor(record.pipelineStatus)">
                     {{ pipelineLabel(record.pipelineStatus) }}
                   </a-tag>
+                  <a-tag v-if="record.pipelineStatus === 'waiting_review'" color="warning" style="margin-left:4px;font-size:11px">⚠ 待人工</a-tag>
                 </template>
 
                 <template v-if="column.key === 'securityScore'">
@@ -309,7 +369,7 @@
                 <template v-if="column.key === 'action'">
                   <div class="review-actions">
                     <a-button
-                      v-if="record.reviewStatus === 'pending_review'"
+                      v-if="record.reviewStatus === 'pending_review' || record.reviewStatus === 'needs_human_review'"
                       type="primary"
                       size="small"
                       @click="approvePackage(record.id)"
@@ -317,18 +377,18 @@
                       通过
                     </a-button>
                     <a-button
-                      v-if="record.reviewStatus === 'pending_review'"
+                      v-if="record.reviewStatus === 'pending_review' || record.reviewStatus === 'needs_human_review'"
                       size="small"
                       @click="openRejectModal(record.id)"
                     >
                       拒绝
                     </a-button>
                     <a-button
-                      v-if="record.pipelineStatus === 'failed'"
+                      v-if="record.pipelineStatus === 'failed' || record.pipelineStatus === 'waiting_review'"
                       size="small"
                       @click="retryPipeline(record.id)"
                     >
-                      重试
+                      重试流水线
                     </a-button>
                     <a-popconfirm
                       title="确认删除该包？删除后不可恢复"
@@ -368,7 +428,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import NavBar from '@/components/NavBar.vue';
 import http from '@/utils/http';
@@ -398,6 +458,10 @@ interface AgentConfig {
   apiKey: string;
   systemPrompt: string;
   webhookUrl: string;
+  heartbeatMinutes: number;
+  dailyDigestHour: number;
+  trendDetectionHour: number;
+  weeklyExpireDay: number;
 }
 
 interface AgentLogItem {
@@ -406,6 +470,7 @@ interface AgentLogItem {
   action: string;
   status: string;
   durationMs: number;
+  detail?: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -517,6 +582,10 @@ const agentConfig = reactive<AgentConfig>({
   apiKey: '',
   systemPrompt: '',
   webhookUrl: '',
+  heartbeatMinutes: 1440,
+  dailyDigestHour: 9,
+  trendDetectionHour: 9,
+  weeklyExpireDay: 1,
 });
 
 const agentSaving = ref(false);
@@ -541,6 +610,10 @@ async function loadAgentConfig(): Promise<void> {
     agentConfig.apiKey = cfg.apiKey ?? '';
     agentConfig.systemPrompt = cfg.systemPrompt ?? '';
     agentConfig.webhookUrl = cfg.webhookUrl ?? '';
+    agentConfig.heartbeatMinutes = cfg.heartbeatMinutes ?? 30;
+    agentConfig.dailyDigestHour = cfg.dailyDigestHour ?? 9;
+    agentConfig.trendDetectionHour = cfg.trendDetectionHour ?? 9;
+    agentConfig.weeklyExpireDay = cfg.weeklyExpireDay ?? 1;
   } catch {
     // keep defaults
   }
@@ -557,6 +630,10 @@ async function saveAgent(): Promise<void> {
       apiKey: agentConfig.apiKey,
       systemPrompt: agentConfig.systemPrompt,
       webhookUrl: agentConfig.webhookUrl,
+      heartbeatMinutes: agentConfig.heartbeatMinutes,
+      dailyDigestHour: agentConfig.dailyDigestHour,
+      trendDetectionHour: agentConfig.trendDetectionHour,
+      weeklyExpireDay: agentConfig.weeklyExpireDay,
     });
     void message.success('Agent 设置已保存');
   } catch {
@@ -660,6 +737,30 @@ function nextAgentLogPage(): void {
   if (!canNextLogPage.value) return;
   void loadAgentLogs(agentLogPage.value + 1);
 }
+
+const autoRefresh = ref(false);
+let autoRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+function toggleAutoRefresh(): void {
+  autoRefresh.value = !autoRefresh.value;
+  if (autoRefresh.value) {
+    autoRefreshTimer = setInterval(() => {
+      void loadAgentLogs(agentLogPage.value);
+    }, 15000);
+  } else {
+    if (autoRefreshTimer !== null) {
+      clearInterval(autoRefreshTimer);
+      autoRefreshTimer = null;
+    }
+  }
+}
+
+onUnmounted(() => {
+  if (autoRefreshTimer !== null) {
+    clearInterval(autoRefreshTimer);
+  }
+});
+
 const announcementText = ref('');
 const announcementSaving = ref(false);
 
@@ -699,14 +800,14 @@ const rejectReason = ref('');
 const rejectTargetId = ref('');
 
 const reviewColumns = [
-  { title: '包名', dataIndex: 'name', key: 'name' },
-  { title: '版本', dataIndex: 'version', key: 'version', width: 90 },
-  { title: '提交人', dataIndex: 'submitter', key: 'submitter', width: 140 },
+  { title: '包名', dataIndex: 'name', key: 'name', width: 130 },
+  { title: '版本', dataIndex: 'version', key: 'version', width: 80 },
+  { title: '提交人', dataIndex: 'submitter', key: 'submitter', width: 160 },
   { title: '安全评分', dataIndex: 'securityScore', key: 'securityScore', width: 100 },
   { title: '流水线状态', dataIndex: 'pipelineStatus', key: 'pipelineStatus', width: 120 },
-  { title: 'Agent 备注', dataIndex: 'reviewNote', key: 'reviewNote', ellipsis: true },
-  { title: '状态', dataIndex: 'reviewStatus', key: 'status', width: 100 },
-  { title: '操作', key: 'action', width: 220 },
+  { title: 'Agent 备注', dataIndex: 'reviewNote', key: 'reviewNote', width: 200, ellipsis: true },
+  { title: '状态', dataIndex: 'reviewStatus', key: 'status', width: 90 },
+  { title: '操作', key: 'action', width: 240 },
 ];
 
 function getScoreClass(score: number | null): string {
@@ -935,6 +1036,12 @@ onMounted(async () => {
   margin-bottom: 24px;
 }
 
+.panel-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .panel-title {
   font-size: 20px;
   font-weight: 700;
@@ -1056,6 +1163,27 @@ onMounted(async () => {
 
 .code-textarea:focus {
   border-color: #585b70;
+}
+
+.schedule-section {
+  margin-top: 16px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.schedule-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #ccc;
+  margin: 0 0 12px 0;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 16px;
 }
 
 .form-actions {
