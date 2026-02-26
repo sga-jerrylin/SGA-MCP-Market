@@ -71,6 +71,7 @@ export class PackagesService {
       status?: string;
       toolsCount?: string;
       credentials?: string;
+      toolsSummary?: string;
     }
   ): Promise<PackageEntity> {
     if (!body.name || !body.version) {
@@ -80,6 +81,9 @@ export class PackagesService {
     const data = file?.buffer ?? randomBytes(16);
     const sha256 = createHash('sha256').update(data).digest('hex');
     const credentialsParsed = this.parseCredentials(body.credentials);
+    const toolsSummary = body.toolsSummary && body.toolsSummary.trim().length > 0
+      ? body.toolsSummary
+      : null;
 
     const entity = this.packagesRepo.create({
       name: body.name,
@@ -92,6 +96,7 @@ export class PackagesService {
       toolsCount: body.toolsCount ? Number(body.toolsCount) || 0 : 0,
       downloads: 0,
       credentials: credentialsParsed,
+      toolsSummary,
       sha256
     });
 

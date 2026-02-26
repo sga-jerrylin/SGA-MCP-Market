@@ -102,6 +102,11 @@ export class PackagesController {
         toolCount?: number;
         sha256?: string;
         credentials?: unknown[];
+        tools?: Array<{
+          name?: string;
+          description?: string;
+          inputSchema?: Record<string, unknown>;
+        }>;
       };
       autoDeploy?: boolean;
     };
@@ -117,7 +122,7 @@ export class PackagesController {
       throw new BadRequestException('metadata.manifest is required');
     }
 
-    const { name, version, description, category, toolCount, credentials } = manifest;
+    const { name, version, description, category, toolCount, credentials, tools } = manifest;
 
     if (!name || !version) {
       throw new BadRequestException('manifest.name and manifest.version are required');
@@ -130,6 +135,19 @@ export class PackagesController {
       category,
       toolsCount: toolCount !== undefined ? String(toolCount) : undefined,
       credentials: credentials !== undefined ? JSON.stringify(credentials) : undefined,
+      toolsSummary: tools
+        ? JSON.stringify(
+            tools
+              .filter((t) => t && typeof t.name === 'string' && t.name.trim().length > 0)
+              .map((t) => ({
+                name: t.name!.trim(),
+                description: typeof t.description === 'string' ? t.description : '',
+                ...(t.inputSchema && typeof t.inputSchema === 'object'
+                  ? { inputSchema: t.inputSchema }
+                  : {})
+              }))
+          )
+        : undefined
     });
 
     return {

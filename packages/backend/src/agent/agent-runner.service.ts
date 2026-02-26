@@ -170,6 +170,8 @@ export class AgentRunnerService {
 
   private async processPackage(config: AgentConfig, pkg: PackageEntity): Promise<void> {
     try {
+      const originalTools = this.parseToolsSummary(pkg.toolsSummary);
+
       await this.webhookTriggers.checkDuplicateName(pkg.name).catch((error: unknown) => {
         const msg = error instanceof Error ? error.message : String(error);
         this.logger.warn(`[AgentRunner] checkDuplicateName failed: ${msg}`);
@@ -225,7 +227,8 @@ export class AgentRunnerService {
       const categoryForNext = classify.autoCategory ?? pkg.category;
 
       await this.packages.update(pkg.id, { pipelineStatus: 'enhancing' });
-      await this.enhanceDescription(config, pkg, categoryForNext);
+      await this.enhanceDescription(config, pkg, categoryForNext, originalTools);
+      await this.validateAndCorrectTools(config, pkg, originalTools);
 
       await this.packages.update(pkg.id, { pipelineStatus: 'imaging' });
       await this.generateLogoImage(config, pkg, categoryForNext).catch((err: unknown) => {
@@ -457,7 +460,8 @@ export class AgentRunnerService {
   private async enhanceDescription(
     config: AgentConfig,
     pkg: PackageEntity,
-    category: string
+    category: string,
+    originalTools: Array<{ name: string; description: string }>
   ): Promise<void> {
     const startedAt = Date.now();
 
@@ -472,15 +476,25 @@ export class AgentRunnerService {
       return;
     }
 
+    const hasExistingTools = originalTools.length > 0;
+    const toolListText = hasExistingTools
+      ? originalTools.map((t) => `- ${t.name}: ${t.description || '(no description)'}`).join('\n')
+      : '';
+
     const toolCount = Math.max(pkg.toolsCount, 1);
     const prompt =
       'You are a technical writer for an MCP tool registry. Enhance this package description:\n' +
-      `Name: ${pkg.name}, Description: ${pkg.description}, Category: ${category}, Tools count: ${pkg.toolsCount}\n` +
+      `Name: ${pkg.name}, Description: ${pkg.description}, Category: ${category}\n` +
+      (hasExistingTools
+        ? `Existing tools (you MUST keep the exact tool names, only improve descriptions):\n${toolListText}\n`
+        : `Tools count: ${pkg.toolsCount}\n`) +
       'Return JSON: {\n' +
       '  "enhancedDescription": "200字以内的中文富描述，突出功能特点和使用场景",\n' +
       '  "toolsSummary": [{"name": "tool_name", "description": "一句话中文描述"}]\n' +
       '}\n' +
-      `Generate ${toolCount} tools in toolsSummary (or at least 1 if toolsCount is 0).`;
+      (hasExistingTools
+        ? `Return toolsSummary for ALL ${originalTools.length} existing tools using their EXACT original names, only improve the Chinese descriptions.`
+        : `Generate ${toolCount} tools in toolsSummary (or at least 1 if toolsCount is 0).`);
 
     try {
       const raw = await this.openRouter.chatCompletion({
@@ -537,6 +551,147 @@ export class AgentRunnerService {
         }
       });
       throw error;
+    }
+  }
+
+  private async validateAndCorrectTools(
+    config: AgentConfig,
+    pkg: PackageEntity,
+    originalTools: Array<{ name: string; description: string }>
+  ): Promise<void> {
+    const startedAt = Date.now();
+
+    if (originalTools.length === 0) {
+      await this.saveLog({
+        packageId: pkg.id,
+        action: 'validate',
+        status: 'success',
+        durationMs: Date.now() - startedAt,
+        detail: { skipped: true, reason: 'no original tools' }
+      });
+      return;
+    }
+
+    try {
+      const latest = await this.packages.findOne({ where: { id: pkg.id } });
+      const aiTools = this.parseToolsSummary(latest?.toolsSummary ?? pkg.toolsSummary);
+
+      // Force names to remain exactly as originally uploaded.
+      const corrected: ToolSummaryItem[] = originalTools.map((origin, index) => {
+        const matchedByName = aiTools.find((item) => item.name === origin.name);
+        const matchedByIndex = aiTools[index];
+        const candidate =
+          matchedByName?.description?.trim() ??
+          matchedByIndex?.description?.trim() ??
+          origin.description?.trim() ??
+          '';
+
+        return {
+          name: origin.name,
+          description: candidate || origin.description || ''
+        };
+      });
+
+      const renamedCount = originalTools.reduce((count, origin, index) => {
+        const aiName = aiTools[index]?.name ?? '';
+        return count + (aiName !== origin.name ? 1 : 0);
+      }, 0);
+
+      let replacedDescriptionCount = 0;
+
+      if (config.apiKey) {
+        const prompt =
+          'Check if these tool descriptions logically match their names. ' +
+          'Return JSON array of {name, valid: bool, reason}. ' +
+          `Tools: ${JSON.stringify(corrected)}`;
+
+        const raw = await this.openRouter.chatCompletion({
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          model: config.model,
+          messages: [{ role: 'user', content: prompt }],
+          maxTokens: 220,
+          systemPrompt: config.systemPrompt ?? undefined
+        });
+
+        const checks = this.parseJsonArrayBlock<
+          Array<{ name?: unknown; valid?: unknown; reason?: unknown }>
+        >(raw);
+
+        if (checks) {
+          const invalidNames = new Set<string>();
+          for (const item of checks) {
+            const name = typeof item?.name === 'string' ? item.name.trim() : '';
+            const valid = typeof item?.valid === 'boolean' ? item.valid : true;
+            if (name && !valid) {
+              invalidNames.add(name);
+            }
+          }
+
+          if (invalidNames.size > 0) {
+            for (let i = 0; i < corrected.length; i += 1) {
+              if (invalidNames.has(corrected[i].name)) {
+                corrected[i].description = originalTools[i].description || corrected[i].description;
+                replacedDescriptionCount += 1;
+              }
+            }
+          }
+        }
+      }
+
+      await this.packages.update(pkg.id, { toolsSummary: JSON.stringify(corrected) });
+
+      await this.saveLog({
+        packageId: pkg.id,
+        action: 'validate',
+        status: 'success',
+        durationMs: Date.now() - startedAt,
+        detail: {
+          model: config.apiKey ? config.model : null,
+          renamedCount,
+          replacedDescriptionCount,
+          toolsSummaryCount: corrected.length,
+          llmChecked: Boolean(config.apiKey)
+        }
+      });
+    } catch (error) {
+      await this.saveLog({
+        packageId: pkg.id,
+        action: 'validate',
+        status: 'failed',
+        durationMs: Date.now() - startedAt,
+        detail: {
+          model: config.model,
+          error: error instanceof Error ? error.message : String(error)
+        }
+      });
+      throw error;
+    }
+  }
+
+  private parseToolsSummary(toolsSummary: string | null | undefined): ToolSummaryItem[] {
+    if (!toolsSummary) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(toolsSummary) as unknown;
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      return (parsed as Array<unknown>)
+        .filter(
+          (item): item is { name: string; description?: string } =>
+            typeof (item as Record<string, unknown>)?.name === 'string'
+        )
+        .map((item) => ({
+          name: item.name.trim(),
+          description: String(item.description ?? '').trim()
+        }))
+        .filter((item) => item.name.length > 0);
+    } catch {
+      return [];
     }
   }
 
@@ -669,6 +824,18 @@ export class AgentRunnerService {
   private parseJsonBlock<T extends object>(text: string): T | null {
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return null;
+      }
+      return JSON.parse(jsonMatch[0]) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  private parseJsonArrayBlock<T>(text: string): T | null {
+    try {
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
       if (!jsonMatch) {
         return null;
       }
