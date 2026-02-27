@@ -230,6 +230,33 @@ export class AgentRunnerService {
       await this.enhanceDescription(config, pkg, categoryForNext, originalTools);
       await this.validateAndCorrectTools(config, pkg, originalTools);
 
+      if (originalTools.length > 0) {
+        const latestAfterValidate = await this.packages.findOne({ where: { id: pkg.id } });
+        const finalTools = this.parseToolsSummary(latestAfterValidate?.toolsSummary ?? pkg.toolsSummary);
+        const originalNames = originalTools.map((tool) => tool.name);
+        const mutatedIndexes = originalNames
+          .map((name, index) => (finalTools[index]?.name !== name ? index : -1))
+          .filter((index) => index >= 0);
+
+        if (mutatedIndexes.length > 0) {
+          this.logger.error(
+            `[SchemaGuard] INTEGRITY FAIL: ${mutatedIndexes.length} tool names mutated after pipeline, pkg: ${pkg.id}`
+          );
+
+          const correctedSummary = originalTools.map((origin, index) => {
+            const finalDescription = (finalTools[index]?.description ?? '').trim();
+            return {
+              name: origin.name,
+              description: finalDescription || origin.description || ''
+            };
+          });
+
+          await this.packages.update(pkg.id, {
+            toolsSummary: JSON.stringify(correctedSummary)
+          });
+        }
+      }
+
       await this.packages.update(pkg.id, { pipelineStatus: 'imaging' });
       await this.generateLogoImage(config, pkg, categoryForNext).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
@@ -580,6 +607,14 @@ export class AgentRunnerService {
       const corrected: ToolSummaryItem[] = originalTools.map((origin, index) => {
         const matchedByName = aiTools.find((item) => item.name === origin.name);
         const matchedByIndex = aiTools[index];
+        const aiNameByIndex = matchedByIndex?.name?.trim() ?? '';
+
+        if (aiNameByIndex && aiNameByIndex !== origin.name) {
+          this.logger.error(
+            `[SchemaGuard] Tool name mutation detected: "${aiNameByIndex}" → restored to "${origin.name}" (pkg: ${pkg.id}, index: ${index})`
+          );
+        }
+
         const candidate =
           matchedByName?.description?.trim() ??
           matchedByIndex?.description?.trim() ??
